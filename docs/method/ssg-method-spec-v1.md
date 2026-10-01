@@ -238,6 +238,12 @@ Quality flags are **methodology** signals (distinct from plausibility warnings).
 | `ud_extreme` | U/D ratio > **15.0** (reconsider high/low) | warn |
 | `relative_value_high` | relative value ≥ **100%** (current P/E ≥ average) | info |
 
+**Shown flags (presentation, not a method change):** of the two high-P/E flags only the higher
+threshold is shown (owner decision 2026-09-26), by one rule `core::ssg::shown_quality_flags` shared by
+the study screen and its PDF (« Signaux de qualité », « — » when not assessable), the comparison, the
+review and the MCP `get_study`, which also carries `quality_flags_assessable` (an empty list means
+« none » only when it is `true`) (réconcilié 2026-10-01 : PR #278, PR #285).
+
 **Trend "even" band:** a 5-yr trend is *even* when recent years vary by ≤ **0.5 percentage points**
 from the 5-yr average; beyond that it is up/down. [Tutorial p12 "vary by just a few tenths"]
 
@@ -257,6 +263,15 @@ Plausibility issues are **input-data** warnings (distinct from quality flags and
 | `low_price_above_current` | a selected forecast low price > current price (violates the §4 constraint) |
 
 Plausibility warnings never block computation; they surface at the cell.
+
+**Currency, at the fetch (app layer, before anything reaches the engine):** a provider **listing**
+currency other than the study's (or than the currency chosen for an examination) is **refused** —
+nothing applied, named to the owner; a listing in a currency's hundredths (GBX, GBp, ZAc, ILA) is
+refused by its own name. Statements **reported** in another currency than the listing are
+**applied with a named warning**, per the rule above (réconcilié 2026-10-01 : PR #277).
+Décision en attente (Guy) : comptes publiés dans une autre devise que la cotation — avertir (état
+actuel) ou bloquer. Décision en attente (Guy) : cotations en centièmes (GBX…) — refusées
+aujourd'hui ; conversion ou non.
 
 **`split_series_break` — normative detection rule** *(absorbed at ssg-1.1.0; quantifies
 "inconsistent with sales")*:
@@ -299,6 +314,12 @@ The verdict is **degraded or withheld** when any load-bearing input is missing, 
 
 The `FullVerdict` type (Story 1.11) is constructible **only** when every load-bearing input is `✓`
 and not stale.
+
+`current_price` carries its origin (provider + session date, or typed + date); a fetched price
+becomes stale when a later refresh fails, which makes the verdict provisional (« Prix actuel —
+périmé ») until the next successful refresh; a typed price is never flagged (réconcilié 2026-10-01 :
+PR #274). Décision en attente (Guy) : horizon d'âge du cours (PRD Appendix A : « un jour de bourse »
+par défaut, réglable) — non implémenté ; seul l'échec d'un rafraîchissement rend le cours périmé.
 
 ## 6. Banned-verb list (FR13) — posture gate
 

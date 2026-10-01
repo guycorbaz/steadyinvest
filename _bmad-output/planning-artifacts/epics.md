@@ -34,6 +34,11 @@ implementable stories. NAIC/BetterInvesting reference docs inform the SSG method
 
 ### Functional Requirements
 
+> Reconciled 2026-10-01 (H3): FR20, FR33 and FR68 below are restated to match `main`; the PRD also
+> qualifies FR3, FR5, FR10, FR12, FR23, FR28, FR41, FR50, FR60, FR62, FR63 and FR67 and carries the
+> « Décision en attente (Guy) » notes — the PRD is the reference (réconcilié 2026-10-01 : revue
+> projet p1/p2).
+
 **Stock Study & Methodology Engine**
 - FR1 [P1]: The user can create a Stock Study for a security.
 - FR2 [P1]: The user can persist and reopen a study with its full state intact.
@@ -58,7 +63,7 @@ implementable stories. NAIC/BetterInvesting reference docs inform the SSG method
 - FR17 [P1]: Each data cell carries an independently queryable source (provider/manual/derived). [P4]: a validated AI draft is an owner entry — source manual, reconciled as manual (FR22), review tag `?` (FR74) — and shows its AI origin (client, model, validation date) until the owner next edits the value; the AI origin is not a separate source.
 - FR18 [P1]: Each data cell carries an independently queryable provenance and timestamp.
 - FR19 [P1]: Per-cell coverage is represented as present / to-fill / not-available-accepted.
-- FR20 [P1]: Each cell (and the study as a whole) carries a tri-state review tag — `none` / `? to-review` / `✓ validated` — with a soft-lock: a `✓` cell must be explicitly un-validated (→ `?`) before its value can be edited, and a refresh that diverges from a validated value auto-tags it `✓→?`. (Supersedes the original binary auto-reset wording; see GitHub issue #1.) A validated AI value [P4] enters with review tag `?`, also on a `✓` cell without prior un-validation (FR74).
+- FR20 [P1]: Each cell (and the study as a whole) carries a tri-state review tag — `none` / `? to-review` / `✓ validated` — with a soft-lock: a `✓` cell must be explicitly un-validated (→ `?`) before its value can be edited, and a refresh that diverges from a validated value keeps the `✓` and the value and parks the provider value beside it as pending, for the owner to accept or keep (réconcilié 2026-10-01 : issue #110 option b — PR #123; was « auto-tags it `✓→?` »). (Supersedes the original binary auto-reset wording; see GitHub issue #1.) A validated AI value [P4] enters with review tag `?`, also on a `✓` cell without prior un-validation (FR74).
 - FR21 [P1]: The user can trigger a manual refresh of provider data; a refresh is user-initiated only, never through MCP.
 - FR22 [P1]: On refresh, a manual value takes precedence over a fetched value while the fetched value is preserved (non-destructive reconciliation). A validated AI value [P4] reconciles as a manual value.
 - FR23 [P1]: On provider failure, last-known values are retained and affected data is flagged stale/to-update.
@@ -73,7 +78,7 @@ implementable stories. NAIC/BetterInvesting reference docs inform the SSG method
 - FR30 [P1]: The user can view growth and valuation charts for a study.
 - FR31 [P1]: The user can set a judgment line by exact value or direct manipulation (kept in sync), with live recalculation of zones.
 - FR32 [P1]: The user can undo judgment changes; adjusting a line never destroys a saved input.
-- FR33 [P1]: The system never auto-places or suggests a judgment line. [P4]: an AI-proposed judgment (FR72) is shown on the chart as a line annotated "AI" beside the owner's; while pending it changes no verdict, zone or alert. Once validated it becomes the study's judgment and keeps the annotation "placed by AI" with its validation date until the owner next moves or edits it.
+- FR33 [P1]: The system never sets a judgment for the owner: an untouched judgment line starts from a dimmed derived seed (least-squares EPS line on §1, historical average P/E on §3) and a one-click « hist. » value to adopt; a seed never feeds the evaluation, the verdict or an alert until the owner sets or adopts the value (réconcilié 2026-10-01 : issue #121, PR #137; was « never auto-places or suggests a judgment line »). [P4]: an AI-proposed judgment (FR72) is shown on the chart as a line annotated "AI" beside the owner's; while pending it changes no verdict, zone or alert. Once validated it becomes the study's judgment and keeps the annotation "placed by AI" with its validation date until the owner next moves or edits it.
 
 **Watchlist & Alerts**
 - FR34 [P1]: The user can maintain a watchlist (add, edit, remove, reorder).
@@ -122,7 +127,7 @@ implementable stories. NAIC/BetterInvesting reference docs inform the SSG method
 - FR65 [P1]: The user can run the full study and portfolio-risk workflow offline; the only online action is a user-initiated refresh. AI assistance [P4] is optional; no workflow requires it.
 - FR66 [P1]: The journal is kept in a portable local store an external system (e.g. file sync) can back up.
 - FR67 [P1]: The user can choose the journal directory; the app remembers recent journals and reopens the last-used journal on launch. The pointer `(journal_id, last-seen-version)` lives in per-machine app-config (via `directories`), never inside the journal. A single-instance lock guards the open journal. The app detects a sync folder (Synology/Dropbox/OneDrive/iCloud) and warns, keeping the live DB local with versioned backups to the sync folder (SQLite `journal_mode=DELETE/TRUNCATE`). (New requirement; arch ADD7/ADD8; GitHub issue #2.) [P4]: draft writes arriving through MCP never corrupt or race the open session.
-- FR68 [P1]: The decision-time verdict is frozen and immutable — stamped with `method_version`, dated FX and the exact inputs — and is the only verdict persisted. A "recompute with today's method" verdict is produced on demand for comparison/debug, never persisted and never automatic. On a `method_version` change the UI offers a labelled "frozen (vNN, DD/MM) vs recomputed (vMM, today)" compare. (New requirement; arch ADD10; GitHub issue #3.) Decision time (owner, 2026-09-27): the verdict is frozen when the owner validates the study with an explicit action, available only when the verdict is full (every load-bearing input `✓`); validating again later replaces the frozen verdict, the previous one stays in the study history (FR51). Whenever the current verdict later differs from the frozen one — after a refresh, an owner edit or a method change — the difference is highlighted, naming what changed and why where known (FR29), neutrally. [P4]: no verdict is frozen or changed through MCP; the MCP read returns the frozen verdict beside the current one. (Delivered in Epic 8, Story 8.8.)
+- FR68 [P4]: The decision-time verdict is frozen and immutable — stamped with `method_version`, the `inputs_hash`, the exact load-bearing inputs and the date (a study verdict involves no FX) — and is the only verdict persisted. The current verdict is always computed live and shown, never persisted; whenever it differs from the frozen one (facts, `inputs_hash` or `method_version`) the study shows both, « figé (<method_version>, <date>) » and « actuel (<method_version>, aujourd'hui | provisoire | retenu) » (réconcilié 2026-10-01 : D11 / arch A13 / story 8.8 decision 1; was [P1], « recomputed on demand, never automatic, compare on a `method_version` change »). (New requirement; arch ADD10; GitHub issue #3.) Decision time (owner, 2026-09-27): the verdict is frozen when the owner validates the study with an explicit action, available only when the verdict is full (every load-bearing input `✓`); validating again later replaces the frozen verdict, the previous one stays in the study history (FR51). Whenever the current verdict later differs from the frozen one — after a refresh, an owner edit or a method change — the difference is highlighted, naming what changed and why where known (FR29), neutrally. [P4]: no verdict is frozen or changed through MCP; the MCP read returns the frozen verdict beside the current one. (Delivered in Epic 8, Story 8.8.)
 
 **AI Assistance (MCP) [P4]**
 - FR69 [P4]: An AI client can read, through MCP, the dossier's studies — data cells, provenance, judgments, study rationale, notes, judgment history and computed outputs (zones, upside/downside ratio, 5-year potential, verdict and its state) — and the record of drafts (FR77); the portfolio (holdings, transactions, dividends), the watchlist, keys and configuration are never exposed. The MCP server serves the last-used dossier, also while the app is closed, and every response names the dossier (identity and location) it read.
@@ -687,7 +692,7 @@ So that the judgment moment is direct, fast and reversible — the heart of the 
 **Given** the §1 semi-log growth chart (Sales/EPS/Price, solid historical / dashed projection, 5–30% guide fan, 1→200 axis) rendered natively in Slint
 **When** I drag a judgment trend line (or set it by exact value — kept in sync)
 **Then** the estimated future Sales/EPS update, §4 forecast/zones recompute, and the zone bar **recolours within ~100 ms** under my hand (NFR-P1, FR30, FR31)
-**And** the chart **never auto-places or suggests** a judgment line (FR33)
+**And** the chart **never auto-places or suggests** a judgment line (FR33) — as delivered, an untouched line starts from a dimmed derived seed that never feeds §4 or the verdict until the owner sets it (réconcilié 2026-10-01 : issue #121, PR #137)
 **And** if Epic 1's spike B was NO-GO, the agreed Slint fallback rendering is used (never egui/web).
 
 ### Story 2.9: Undo/redo & scenario compare
@@ -757,7 +762,7 @@ So that I can learn by exploration and verify correctness on demand.
 **When** there is no data or an error
 **Then** an **actionable empty state** (e.g. "create your first study" + link to the demo) and clear neutral error/feedback messages are shown (FR58)
 **And** a consistent **legend** for freshness/provenance/coverage/confidence states is available (FR57)
-**And** a non-blocking **contextual help/glossary** popover and a **read-only demonstration study** are accessible (FR62)
+**And** a non-blocking **contextual help/glossary** popover and a **read-only demonstration study** are accessible (FR62) — as delivered, the help is one glossary and legend hub in Réglages (story 2.13 scope decision 2), and the demo is offered on the empty list and beside « Créer une étude… » once studies exist, every writing gesture disabled (réconcilié 2026-10-01 : PR #279, PR #284)
 **And** a **"verify engine"** path runs the bundled golden studies (Epic 1) and reports any deviation (FR9 UI).
 
 ### Story 2.14: Neutral voice & banned-verb enforcement
@@ -862,7 +867,7 @@ So that updating an existing study is a quick, safe ritual.
 
 **Given** a previously saved, validated study
 **When** I reopen it and trigger a re-fetch (optionally after "unlock all")
-**Then** manual entries and judgment lines are **preserved**, changed cells whose value diverges from a `✓` reset to `?`, and I re-validate only what actually moved (FR3 + FR22 + Journey 2b)
+**Then** manual entries and judgment lines are **preserved**, a `✓` cell whose provider value diverges keeps its value and `✓`, the provider value parked beside it for me to accept or keep (réconcilié 2026-10-01 : issue #110 option b — PR #123; was « reset to `?` »), and I re-validate only what actually moved (FR3 + FR22 + Journey 2b)
 **And** the projection can be extended and the study's history reflects what changed and when.
 
 ## Epic 4: Watchlist & single-portfolio risk
@@ -976,7 +981,7 @@ So that I learn from my own past judgments.
 
 **Given** a saved study and a post-decision price-history cache (sourced via Epic 3 refresh, stored in `persistence`)
 **When** I reopen the study in "confront" mode
-**Then** its **recorded projection is overlaid on the security's actual trajectory since** the decision (FR50, ADD13)
+**Then** its **recorded projection is overlaid on the security's actual trajectory since** the decision (FR50, ADD13) — the recorded projection is the frozen verdict's band dated its validation; without a frozen verdict, today's band, said as such and dated the creation (réconcilié 2026-10-01 : PR #280). Décision en attente (Guy) : une re-validation déplace la date de décision.
 **And** the historical snapshot is unchanged by the comparison (read-only).
 
 ### Story 5.2: Export / import a single study
@@ -1179,9 +1184,9 @@ So that a decision can never be half-applied, lost by a later save, or confused 
 **Then** the draft reads as **stale** (computed on read); the fingerprint uses the explicit encoding of arch A7 — cell: normalised value, source, pending provider value (not timestamp or digest); judgment: field value + load-bearing inputs + `METHOD_VERSION` — and tests show that a refresh of the EPS history or a method change marks a judgment draft stale, a parked divergent provider value marks a cell draft stale, and a value-identical re-stamp does not (FR72)
 **And** a draft whose target no longer exists reads **target gone** and cannot be validated
 **When** the owner validates or rejects a draft
-**Then** the decision goes through the app's study state (owner decision D3): the target study is the open study — deciding a draft of another study opens it first, as the app has one undo history for the open study, reset on open — and the draft is applied to it and pushed on its undo stack; `persistence::decide_draft(study, draft_id, decision)` then writes the study upsert (with its history entry) and the draft's `status`, `decided_at`, `stale_at_decision`, `edited_before_validation` in **one** transaction, re-checking the fingerprint the owner confirmed inside it (a change since → refused, nothing written); the open study is refreshed from the dossier without resetting its undo history; a crash injected between the writes leaves both unchanged (NFR-R2, arch A7, A8)
+**Then** the decision goes through the app's study state (owner decision D3): the target study is the open study — deciding a draft of another study opens it first, as the app has one undo history for the open study, parked on close and given back on reopen if the stored study is unchanged (réconcilié 2026-10-01 : story 8.5b deviation 3 / G3 1, arch A8; was « reset on open ») — and the draft is applied to it and pushed on its undo stack; `persistence::decide_draft(study, draft_id, decision)` then writes the study upsert (with its history entry) and the draft's `status`, `decided_at`, `stale_at_decision`, `edited_before_validation` in **one** transaction, re-checking the fingerprint the owner confirmed inside it (a change since → refused, nothing written); the open study is refreshed from the dossier without resetting its undo history; a crash injected between the writes leaves both unchanged (NFR-R2, arch A7, A8)
 **And** a save of the in-memory study after a decision can never overwrite the applied value (lost-update test)
-**And** undoing a validation restores the prior study and sets the draft to `validated_undone` in one transaction; redoing it re-applies the value and sets the draft back to `validated`, in one transaction too; the validation stays undoable while its study remains open (FR32, FR77, arch A8)
+**And** undoing a validation restores the prior study and sets the draft to `validated_undone` in one transaction; redoing it re-applies the value and sets the draft back to `validated`, in one transaction too; the validation stays undoable while its study remains open, and again after a reopen while the stored study is unchanged (parked history) (FR32, FR77, arch A8) (réconcilié 2026-10-01 : story 8.5b deviation 3)
 **And** a validated, undone or rejected draft stays in `ai_drafts` with its outcome and decision facts (FR77).
 
 ### Story 8.3: `McpAccess` — the gated access surface (headless)
@@ -1260,7 +1265,7 @@ So that I know what the AI proposed before I decide anything.
 
 **Given** pending drafts in the dossier (submitted while the app was open or closed)
 **When** I open the app, or drafts arrive while it is open
-**Then** the inbox specified in 8.0 lists them, and each concerned study shows the reminder of its pending drafts; new drafts appear within ~3 s via `PRAGMA data_version` polling (Slint Timer) and on window focus / inbox open — no file watcher (FR73, owner decision O2, arch A9)
+**Then** the inbox specified in 8.0 lists them, and each concerned study shows the reminder of its pending drafts; new drafts appear within ~3 s via `PRAGMA data_version` polling (Slint Timer, every 2.5 s), on inbox open and after the app's own draft-affecting writes — no window-focus trigger, Slint 1.17 exposing no window-activation API (réconcilié 2026-10-01 : story 8.5a decision 1; was « on window focus / inbox open ») — no file watcher (FR73, owner decision O2, arch A9)
 **And** each item shows its AI origin (client + model), its comment, its target (study · field · fiscal year) and the current vs proposed value side by side; a stale draft shows as stale with the current value; a target-gone draft shows as such (FR72, FR73)
 **And** draft studies are listed with their proposed currency and name; their validation arrives in 8.7 and the item says so, in the 8.0 wording
 **And** all AI text (comments, proposed notes) is rendered only through the dedicated AI-frame component — label + disclaimer — and a structural test scans the `.slint` sources and fails if an AI-origin property is bound outside it (FR13, FR64, arch A12)
@@ -1311,7 +1316,7 @@ So that the AI can challenge my numbers without ever moving my verdict.
 **And** any later write to that judgment field clears the annotation, while the history keeps it (FR51)
 **And** undo after validation restores the prior judgment and records the draft as `validated_undone` (FR32, FR77)
 **And** the metamorphic pending-drafts test of Story 8.3 is extended to judgment drafts through the app's view-model path: every computed output and every alert is identical with and without pending judgment drafts
-**And** the system itself still never places or suggests a line — only an owner-validated AI draft does (FR33)
+**And** the system itself still never places or suggests a line — only an owner-validated AI draft does (FR33); the app's dimmed seeds (issue #121) never count as a placed judgment (réconcilié 2026-10-01 : PR #137)
 **And** the Epic 8 posture AC holds.
 
 ### Story 8.7: Draft study end-to-end & drafts record
@@ -1348,13 +1353,13 @@ So that my decision stays on record and a later refresh never silently rewrites 
 **Acceptance Criteria:**
 
 **Given** an open study whose verdict is `Full` (every load-bearing input `✓`)
-**When** I choose « Valider l'étude » (placed and worded as specified in 8.0)
+**When** I choose « Valider l'étude » (placed and worded as specified in 8.0) — Décision en attente (Guy) : placement du bouton (story 8.8 décision 16, liée à G6) ; le code le place sur sa propre ligne sous la rangée d'actions, trop large pour la fenêtre
 **Then** the study stores `frozen_verdict: Option<FrozenVerdict>` (`#[serde(default)]`) in its blob: the verdict facts (verdict, zones, upside/downside ratio, 5-year potential), the `inputs_hash` and `method_version` of `core::verdict::FullVerdict`, the load-bearing input values it was computed from, and `frozen_at` — through the normal study upsert, with its history entry (FR68, FR51, owner decision D11, arch A13)
 **And** the action is unavailable while the verdict is provisional or withheld, and says why, naming the inputs still open (FR12)
 **And** validating again later replaces the frozen verdict; the previous one stays readable in the study history (FR51); the freeze is undoable in the session like any owner edit (FR32)
 **Given** a study with a frozen verdict
 **When** its current verdict — always computed live, never persisted — differs from the frozen one in its facts, `inputs_hash` or `method_version`, after a refresh, an owner edit, a validated AI draft or a method change
-**Then** the study shows both, labelled « figé (vNN, JJ/MM) » and « actuel (vMM, aujourd'hui) », highlights each item that changed (verdict, zone, U/D, 5-year potential), and names the cause where known (refresh, owner edit, method change via the #252 method stamp) (FR68, FR29)
+**Then** the study shows both, labelled « figé (vNN, JJ/MM) » and « actuel (vMM, aujourd'hui) » — as delivered « figé (ssg-1.2.0, JJ/MM) » and « actuel (ssg-1.2.0, aujourd'hui | provisoire | retenu) » (réconcilié 2026-10-01 : story 8.8 decision 9) — highlights each item that changed (verdict, zone, U/D, 5-year potential), and names the cause where known (refresh, owner edit, method change via the #252 method stamp) (FR68, FR29)
 **And** when nothing differs, only the verdict and « validée le JJ/MM » are shown
 **And** the wording is neutral — facts only, no banned verb (FR13); the highlight is distinguishable without colour alone (NFR-U1)
 **And** the study PDF shows the frozen verdict and, when it differs, the current one, as decided in 8.0 (FR52)

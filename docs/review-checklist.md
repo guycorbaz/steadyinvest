@@ -66,3 +66,9 @@ fix). A pushed panel re-syncs while open and clears on journal switch.
 
 Timing/retry/pacing decisions are pure functions consumed by the loop that sleeps — no sleep-based
 tests, ever. `Instant` for infra timing; the injected ADD15 clock for journal facts only.
+
+## 9. Decisions reach the validated text (project review 2026-10-01)
+
+A deviation recorded as a decision in a story file is carried into the validated text (PRD,
+architecture, UX spec) in the same PR, or listed for the next text reconciliation (H3) — never left
+only in the story record (réconcilié 2026-10-01 : revue p2 §8).

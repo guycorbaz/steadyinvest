@@ -1,3 +1,5 @@
+> Document hérité d'une ancienne pile (web) — sans objet pour l'application actuelle ; conservé pour l'historique.
+
 # Living Documentation Process
 
 **Created:** 2026-02-10

@@ -101,8 +101,8 @@ text** is marked `{IA:…}` and may only appear inside an `AiFrame` (§4.1).
 - Row parts (app text): group header « {TICKER} ({DEV}) » · draft-study group « Nouvelles études » · « Actuel {x} → Proposé {y} » · for a note « Nouvelle note » · row button « Détail » / « Masquer le détail » (Registre) · record flag « périmée à la décision ».
 - Draft-study row (8.5a): « Nouvelle étude : {TICKER} ({DEV}) » then, inside the compact `AiFrame`, the proposed company name and the comment: « {IA:nom} — {IA:commentaire} » (no name: the comment alone).
 - Draft-study row until 8.7 ships (8.5a): « La validation d'une proposition d'étude n'est pas encore disponible ; la proposition reste en attente. »
-- Draft-study row button (8.7): « Valider… » (opens the prefilled create dialog directly — Q14).
-- Create form opened from a draft study (8.7): sentence « Étude proposée par une IA ; vérifiez le symbole, la devise et le nom avant de créer. » — the form-id `study-create` gains a draft variant (§4.2).
+- Draft-study row button (8.7): « Valider… » (opens the prefilled create dialog directly — Q14). Opening the row itself shows a draft-study variant of the decision dialog: « Valider… » · « Rejeter » · « Annuler » (initial focus « Annuler »), so a draft study can be rejected (réconcilié 2026-10-01 : story 8.7 décision 1).
+- Create form opened from a draft study (8.7): sentence « Étude proposée par une IA ; vérifiez le symbole, la devise et le nom avant de créer. » — the form-id `study-create` gains a draft variant (§4.2). The form keeps the ordinary verb « Enregistrer » (réconcilié 2026-10-01 : story 8.7 décision 11).
 
 **Decision dialog (8.5b, 8.6, 8.7)**
 - Title: « Proposition de l'IA ». Columns: « Actuel » · « Proposé ».
@@ -157,7 +157,7 @@ text** is marked `{IA:…}` and may only appear inside an `AiFrame` (§4.1).
 - Outcome: « Étude validée ; verdict figé le {JJ/MM}. » · undo (Ctrl+Z): « Validation de l'étude annulée. »
 - Strip (same): « Étude validée le {JJ/MM} ; le verdict actuel est identique au verdict figé. »
 - Band (differs, •): « Le verdict actuel diffère du verdict figé le {JJ/MM}. » + « Voir la comparaison » / « Masquer la comparaison ».
-- Table columns: « figé ({méthode}, {JJ/MM}) » · « actuel ({méthode}, aujourd'hui) » — « actuel (…, provisoire) » / « actuel (…, retenu) » when the current verdict is not full.
+- Table columns: « figé ({méthode}, {JJ/MM}) » · « actuel ({méthode}, aujourd'hui) » — {méthode} is the stored method string verbatim, e.g. « ssg-1.2.0 » (réconcilié 2026-10-01 : story 8.8 décision 9) — « actuel (…, provisoire) » / « actuel (…, retenu) » when the current verdict is not full.
 - Table rows: « Verdict » · « Zone du prix » · « Ratio hausse/baisse » · « Valeur relative » · « Appréciation projetée » · « Potentiel à 5 ans » · « Entrées » · « Méthode ».
 - Withheld cell: « retenu — entrées ouvertes : {liste} ».
 - Entrées row: « identiques » or « {n} modifiée(s) : {champ} {figé} → {actuel}, … ».
@@ -181,6 +181,7 @@ A stable English `snake_case` code (never shown in the UI) + a French message:
 - `study_exists` — « L'étude {TICKER} en {DEV} existe déjà ; rien n'a été enregistré. »
 - `draft_study_pending` — « Une proposition d'étude {TICKER} en {DEV} est déjà en attente ; rien n'a été enregistré. »
 - `write_denied` — « Écriture refusée : seule la création de propositions est permise. »
+- **Décision en attente (Guy) : validation des codes ajoutés par 8.3/8.4** (ci-dessous) et de la variante de `dossier_mismatch` ; le texte suit exactement `mcp/src/messages.rs` mais n'a pas été validé par le propriétaire (réconcilié 2026-10-01 : rétro Epic 8 H3, revue p2 écart 4).
 - *Added by Story 8.3 (G3 review, 2026-09-28):*
 - `study_archived` — « L'étude {TICKER} est archivée ; la proposition n'a pas été enregistrée. »
 - `value_out_of_range` — « La valeur « {texte} » de {champ} est hors des bornes d'une proposition (moins de 10¹⁵ en valeur absolue, au plus 10 décimales) ; rien n'a été enregistré. »
@@ -293,8 +294,9 @@ drafts), and 5 falls through the existing `_ => {}` like Réglages today.
   the date, and the compact `AiFrame` (comment, one line; the disclaimer stays). A draft-study row
   shows « Nouvelle étude : {TICKER} ({DEV}) » — ticker and currency as app text (exempt, §4.1) —
   and the proposed company name before the comment, inside the compact `AiFrame`. Click or
-  Enter/Space opens the decision dialog. Draft-study rows carry « Valider… » (Q14) and, until 8.7,
-  the « pas encore disponible » line instead.
+  Enter/Space opens the decision dialog (for a draft study, its variant « Valider… » · « Rejeter » ·
+  « Annuler »). Draft-study rows carry « Valider… » (Q14) and, until 8.7, the « pas encore
+  disponible » line instead (réconcilié 2026-10-01 : story 8.7 décision 1).
 - **« Registre »** — **all** drafts, pending included, read-only. Filters: « Étude : » + outcome
   chips (« En attente · Validées · Validées puis annulées · Rejetées »). Rows: submitted date,
   target, outcome word (+ « périmée à la décision », « modifiée avant validation »), decided date;
@@ -322,7 +324,8 @@ every open.
   there):** §1 growth chart — estimated high EPS and estimated low EPS (and a projected EPS-growth
   draft, drawn as the est-high line it implies); §3 P/E chart (#115) — judged high P/E and judged
   low P/E. The AI line is **dotted** (round dots, `chart-stroke-thin`, ink `text-mid` — on §1 the
-  owner's lines and seeds are solid (thin / dimmed), and on §3 the judged-low P/E level is already
+  owner's lines and seeds are solid (thin / dimmed) except the est-low line, which is dashed (issue
+  #121, built in the view model) — dots stay the free pattern (réconcilié 2026-10-01 : story 8.6 décision 7) —, and on §3 the judged-low P/E level is already
   dashed (`pe_history_chart.slint`), so dots are the one free pattern on both charts), ends in a **hollow circle** endpoint
   marker, carries the label « IA {valeur} », and has **no drag handle** (inert). Three non-colour
   cues: dot pattern + hollow marker + label.
@@ -365,7 +368,10 @@ leading-bottom slot when no lock shows. Cleared by the owner's next edit (A6). *
 column); 8.5b's visual verification shows them side by side at `mark-font`.
 
 ### 5.9 « Valider l'étude » and the frozen verdict (8.8) — see Q12
-- **Button:** in the study action row, after « Historique ». Q12 default: **disabled while the
+- **Button:** in the study action row, after « Historique ». **Décision en attente (Guy) :**
+  placement, lié à la dette de largeur G6 — le code place aujourd'hui le bouton sur sa propre ligne
+  sous la rangée d'actions, celle-ci étant déjà plus large que la fenêtre à 1280 / 1600 (réconcilié
+  2026-10-01 : story 8.8 décision 16). Q12 default: **disabled while the
   verdict is not full, with the reason shown beside it** (« Verdict incomplet — entrées ouvertes :
   … », caption, `text-mid`), as FR68 / Story 8.8 / the 8.0 AC say. With an existing frozen verdict
   it asks the replace confirmation. The freeze is **undoable (Ctrl+Z)** in the session.
@@ -373,7 +379,8 @@ column); 8.5b's visual verification shows them side by side at `mark-font`.
 - **Comparison table:** columns « figé (…) » | « actuel (…) »; when the current verdict is
   provisional the header says « actuel (…, provisoire) » and its figures show in `text-mid`; when
   withheld the column reads « retenu — entrées ouvertes : … » in every row. Rows: « Verdict »
-  (`VerdictFacts.quality_value_candidate` — the verdict word the app already shows), « Zone du prix »
+  (`VerdictFacts.quality_value_candidate`, written « critères réunis » / « critères non réunis »,
+  each criterion followed by « réuni » / « non réuni » / « inconnu » (réconcilié 2026-10-01 : story 8.8 décision 12)), « Zone du prix »
   (`VerdictFacts.present_price_zone`, written with the runtime `Labels.zone-buy / zone-hold /
   zone-sell`, **in ink**, never a zone hue — the current verdict keeps the only coloured badge in
   the verdict bar), « Ratio hausse/baisse » (value + the ≥ 3 criterion), « Valeur relative » (the
@@ -390,22 +397,30 @@ Decision dialog: focus trapped, initial focus per Q5, Esc cancels, Enter activat
 button; the edit form validates with Enter (value) or Ctrl+Enter (note). Study: the band action
 buttons (§4.5), the chart action chips and the judgment action chips (`ActionButton`s), the notes
 buttons, « Valider l'étude », « Voir la comparaison » — all Tab-reachable with the visible focus
-ring. Ctrl+Z / Ctrl+Y undo/redo a validation (and a freeze) while the study stays open (A8).
+ring. Ctrl+Z / Ctrl+Y undo/redo a validation (and a freeze) while the study stays open; on close
+the history is parked with the study and given back on reopen if the stored study has not changed
+(A8) (réconcilié 2026-10-01 : story 8.5b écart 3 / G3 1).
 
 ## 7. Report impact (decided here)
 The study PDF writes Helvetica with **WinAnsi encoding only** (`report/src/pdf.rs`,
 `winansi_byte`): « ★ », « ≠ », « → » and « ≥ » are outside it (`winansi("→")` gives « ? », a
 tested fact in `pdf.rs`), so the PDF uses WinAnsi substitutes: « † » (0x86) for the AI mark, « • »
 (0x95) for a changed row, « -> » for « → » (Entrées row « {champ} {figé} -> {actuel} », history
-and cause line), « >= » for « ≥ » (criteria « ratio >= 3 », « appréciation >= doublement »).
+and cause line), « >= » for « ≥ » (criteria « ratio >= 3 », « appréciation >= doublement »). As
+built, the frozen-verdict block gives the Entrées row as a count (« {n} modifiée(s) »), not the
+per-field « {champ} {figé} -> {actuel} » list (réconcilié 2026-10-01 : story 8.8 décision 13).
 - **Notes: not printed** (unchanged, like the rationale; the PDF is the NAIC form — tiebreaker).
 - **AI-origin values and AI-placed judgments: marked « † »** (0x86) after the figure, with one
   legend line under the table: « † valeur proposée par une IA et validée par l'utilisateur ». A
   judged value that is also AI-placed prints « * † ». A report must not launder an AI value.
-- **Frozen verdict (8.8):** a block after the verdict: « Verdict figé le {JJ/MM/AAAA} ({méthode}) »
-  with its figures and, when it differs from the current one, the comparison table in greyscale,
-  changed rows marked « • » (0x95), and the cause line.
+- **Frozen verdict (8.8):** a block in « Synthèse », after « Position : … »: « Verdict figé le
+  {JJ/MM/AAAA} ({méthode}) » with its figures and, when it differs from the current one, lines
+  « libellé : figé -> actuel » (not a ruled table), changed lines marked « • » (0x95), and the cause
+  line (réconcilié 2026-10-01 : story 8.8 décisions 13, 14).
 - **Comparison (7.1) and review (7.2) — screens and PDFs unchanged, by decision** (Q9).
+  **Décision en attente (Guy) :** vocabulaire neutre de l'écran Comparaison et des PDF (décision du
+  2026-09-26) face à FR63 — tout le reste suit désormais le jeu de libellés (réconcilié 2026-10-01 :
+  PR #275).
 
 ## 8. Acceptance criteria
 
@@ -471,7 +486,9 @@ frozen verdict prints with its comparison (• markers) when it differs; the com
   default contradicts it and 8.6 would be amended.
 - **Q14** Action count for a draft study (open → Valider → Créer = 3 vs FR74 ≤ 2)? **Default: a
   « Valider… » button directly on the draft-study row** (opens the prefilled create dialog; +
-  « Créer » = 2). For other drafts, opening the row counts as action 1.
+  « Créer » = 2). As built: the form's verb is « Enregistrer », and opening the row gives the
+  « Valider… / Rejeter / Annuler » variant so a draft study can be rejected (réconcilié 2026-10-01 : story 8.7
+  décisions 1, 11). For other drafts, opening the row counts as action 1.
 - **Q15** FR64 on compact marks (chart label « IA … », action chips, ★ cell mark, trace line)?
   **Default:** these carry **no AI-written text** (only app-formatted values and the ★/« IA »
   label); the disclaimer is satisfied by the always-visible footer (FR64) plus the `AiFrame` +

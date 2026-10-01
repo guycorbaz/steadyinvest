@@ -44,7 +44,7 @@ discoveryDecisions:
   - "Strategic reframe (accepted): product is a durable PERSONAL SYSTEM OF INVESTMENT DISCIPLINE with cumulative MEMORY of judgments (a revisitable journal), not merely a time-saving study tool. Design the data model 'journal-ready' (timestamped judgment snapshots) from the start, even if full history/versioning UI lands later"
   - "Differentiation: durable edge is CH/EU coverage incumbents ignore, but only if SSG is ADAPTED to EU reality (multi-currency, dividend taxation by jurisdiction, IFRS vs US-GAAP, exchange fragmentation), not merely translated. Faithful form clone = table stake, not the moat"
   - "UX: TWO REGIMES sharing one data truth - (1) faithful paper-form grid for contemplation/judgment, (2) high-throughput entry/reconciliation surface (keyboard nav, paste a column of years, undo) for filling CH/EU gaps. Provenance shown by ATTENTION HIERARCHY not equal signposting: missing = the only state that shouts, stale = a discreet uniform murmur, auto-vs-manual = revealed on demand; strong colors reserved for judgment zones, never for provenance"
-  - "['NEVER a suggested line' part SUPERSEDED 2026-09-27 by G2 for AI lines — see last entry and FR33 [P4]; the app itself still never suggests a line] UX: judgment lines = gesture+value duality (drag for intuition, type exact value for rigor, always synced), reversible (moving a line never destroys a saved input; undo + scenario compare), never auto-moved on a provider refresh, and NEVER a 'suggested line' (suggesting = recommending = breaks neutral posture)"
+  - "['NEVER a suggested line' part SUPERSEDED 2026-09-27 by G2 for AI lines — see last entry and FR33 [P4]; the app itself still never suggests a line — app-side dimmed seeds since PR #137, see FR33 [P1] (réconcilié 2026-10-01 : issue #121)] UX: judgment lines = gesture+value duality (drag for intuition, type exact value for rigor, always synced), reversible (moving a line never destroys a saved input; undo + scenario compare), never auto-moved on a provider refresh, and NEVER a 'suggested line' (suggesting = recommending = breaks neutral posture)"
   - "[SUPERSEDED 2026-09-27 by G2 — see last entry] AI interaction (the 'touch of madness'): AI is a GREFFIER OF MEMORY, not an advisor of the future. It makes PROPOSALS and CRITIQUES (coherence checks, discipline-drift detection, pre-mortem on past misses, fill candidates for missing/stale cells) but NEVER mutates data or judgments. Read-only on journal+engine; any AI output is a draft stamped source:ai-suggested requiring human validation in the UI (a 4th cell source alongside provider/manual/derived). AI must never suggest/place a judgment line (the future is the user's sovereign territory). Purity test for any API endpoint: if an AI response could replace the user's gesture on the line, it is forbidden; if it can only force him to look at his past gesture, it is allowed"
   - "[SUPERSEDED 2026-09-27 by G2 — see last entry] AI runs 100% LOCALLY by default (consistent with offline/private), via a pluggable 'AI provider' abstraction (same pattern as MarketDataProvider) that allows an optional REMOTE AI later"
   - "Portfolio RISK MANAGEMENT is a deliberate overlay BEYOND canonical NAIC (NAIC is strong on stock selection, weak on portfolio risk). Keep it as a SEPARATE, optional, decoupled subsystem so it never weighs down the pure SSG engine. Includes: (a) position-sizing / concentration limits (avoid one holding being a majority of invested capital; thresholds must account for early-stage portfolios being naturally concentrated; extends diversification by holding/sector/size/currency, NAIC-aligned), and (b) trailing stop-loss protection"
@@ -66,7 +66,7 @@ discoveryDecisions:
   - "[AI-greffier part SUPERSEDED 2026-09-27 by G2 — see last entry] REPLACEMENT / capital-redeployment workflow: selling a holding is not an end - it triggers finding what to replace it with (freed cash should be redeployed, NAIC-aligned 'sell only for a better opportunity, stay invested'). On a sell / stop-trigger / Sell-zone entry, the app surfaces replacement candidates from the watchlist (e.g. nearest to / inside their Buy zone, best upside/downside), supports side-by-side Company Comparison, and launches a new Stock Study. The replacement flow must respect portfolio rules (preserve diversification, not re-concentrate by sector/currency; respect capital-at-risk). Neutral posture: surfaces candidates & comparisons (facts), never says 'buy this one'. Cumulative memory records 'sold X -> replaced by Y, date, rationale' for the AI-greffier to later interrogate replacement quality"
   - "2026-09-27 (G2, supersedes the AI parts of the 'AI interaction', 'AI runs 100% LOCALLY' and 'API posture' entries above): NO AI inside the app — it exposes an MCP server; current client = Claude Code on the owner's workstation (local, not network-exposed); a remote model is accepted for now; a self-hosted local model on a dedicated host stays Vision (topology undecided). Exposed to the AI: studies with their data, provenance, judgments, rationale, notes and judgment history — NEVER the portfolio (holdings, transactions, dividends), the watchlist, keys or config. The AI may PROPOSE, only as DRAFTS with a mandatory comment entering the dossier marked draft until the owner validates them in the UI: (a) new studies (tickers it found), (b) notes attached to a study, (c) cell values including judgment values; never a direct write to studies/cells/judgments/verdicts/notes/transactions/portfolio. The owner may give the AI search objectives (market, potential growth, upside/downside ratio…), held in the AI client session only. Ticker search uses the AI's own means; the AI never triggers provider calls — after validating a draft study the owner fetches as usual and the AI then reads the data via MCP. STANCE REVISED: the AI is no longer a read-only 'clerk of memory' that never recommends; it may propose tickers, notes and judgment values; the app's OWN outputs stay neutral. An AI-proposed judgment appears on the chart as an 'AI'-annotated line beside the owner's, counts for nothing while pending, and once validated becomes the study's judgment keeping 'placed by AI' + validation date. New study notes (FR78) are a prerequisite for AI note drafts. Epic 8 = Phase 4 [P4] 'AI assistance'. The AI-greffier interrogation of replacement quality (entries on rationale and replacement workflow) is dropped while the portfolio is not exposed"
 workflowType: 'prd'
-lastEdited: '2026-09-27'
+lastEdited: '2026-10-01'
 editStepsCompleted: ['step-e-01-discovery', 'step-e-02-review', 'step-e-03-edit']
 editHistory:
   - date: '2026-09-27'
@@ -75,6 +75,8 @@ editHistory:
     changes: "G2 round 2: validation fixes + owner decisions O1–O7. One AI-exclusion list everywhere (portfolio — holdings, transactions, dividends — watchlist, keys, configuration); MCP scope adds computed outputs, study rationale and the drafts record; validated AI value = owner entry (manual, `?`) with AI origin shown until next owner edit (FR17/FR20/FR22/FR33/FR74); notes are [P4] in P1 wording (FR49/FR51, Success, Journey 5); stale drafts validatable after confirmation, ✓ target moves to `?` without un-validation (FR72/FR74); ≤ 2 actions in FR74; MCP serves the last-used dossier also while the app is closed, names the dossier in every response (FR69/FR73); note deletion kept in history (FR78); study deletion deletes its drafts (FR55/FR77); privacy residue of free text (NFR-S3); remote-model caveat (Security & privacy, Constraints); « dossier » = journal file (Appendix A); frontmatter 'suggested line' and AI-greffier entries marked superseded"
   - date: '2026-09-27'
     changes: "G2 round 3 (G3 review of PR #255, owner decisions D1–D10; D11 FR68 decision time = explicit « Valider l'étude » on a full verdict, differences highlighted, delivered in Story 8.8): draft study carries a proposed currency and optional name, duplicates keyed by identifier + currency, validation through the prefilled create dialog (FR70); one pending draft per target, provider market facts not draftable, missing target not validatable (FR72); `?` in every case, validation undoable and recorded (FR74, FR77); older builds refuse exports carrying notes/AI marks/drafts (FR60); dossier identity is not configuration (NFR-S4, Appendix A); CLI/AI façade wording updated"
+  - date: '2026-10-01'
+    changes: "H3 text reconciliation (Epic 8 retro action H3, widened by the 2026-10-01 project review, revue-projet-2026-10-01/p1-*.md and p2-ecarts-textes.md): the text now states what main does, each changed passage tagged « réconcilié 2026-10-01 ». FR20 + Journey 2b + scope (a divergent refresh freezes a ✓ cell, provider value parked — issue #110 / PR #123); FR33 [P1] (app-side dimmed seeds and « hist. » chips — issue #121 / PR #137); FR68 (current verdict always live, difference shown on any change, no FX in a study verdict — D11 / A13 / story 8.8 decision 1; [P4] label); FR60 (the G2 round-3 entry above is corrected: an older build refuses only the drafts table, it silently drops notes, AI marks and the frozen verdict — D9 withdrawn, story 8.1); FR41 + Appendix A (one default withholding rate, configurable, per-entry override — story 6.4); FR3 (projection window, 5-year horizon — story 2.11); FR28 (the rate's date is its freshness state — story 6.6); FR62 (help = glossary hub in Réglages; demo reachable from the study list — story 2.13, PR #279/#284); FR67 (sync folder: warning + recommendation, manual backups — story 5.5); FR5/FR10/FR12/FR23/FR50/FR63 updated for the fixes of PRs #274–#286 (listing-currency refusal, stale fetched price degrades the verdict, confrontation from the frozen band, zone nouns follow the label set). Owner decisions still open are marked « Décision en attente (Guy) » (price age horizon, mixed statement currency, GBX, comparison/PDF neutral wording, confrontation re-validation date) — not decided here. Earlier entries kept unchanged."
 ---
 
 # Product Requirements Document - steadyinvest
@@ -360,12 +362,14 @@ calculation; reconciliation (manual wins, provider preserved).
 
 A year later the company's annual report lands. Guy reopens the saved study and triggers a
 re-fetch; the app **reconciles** new provider data against what's there — manual entries and his
-judgment lines are preserved, the "validated" flags on changed cells reset so he re-checks what
-actually moved. He extends the projection, the zones recompute, and the study's history shows what
+judgment lines are preserved; a cell he had validated keeps its value and its ✓, and a provider
+value that now differs is parked beside it, flagged, for him to accept or keep — so he re-checks
+what actually moved (réconcilié 2026-10-01 : issue #110 option b — PR #123). He extends the projection, the zones recompute, and the study's history shows what
 changed and when. *New reality:* keeping a study current is a quick, safe annual ritual, not a
 rebuild from scratch.
-**Reveals:** reopen + re-fetch, reconciliation rules (manual/judgment preserved, validated-flag
-reset on change), study update over time, change visibility.
+**Reveals:** reopen + re-fetch, reconciliation rules (manual/judgment preserved, a validated cell
+frozen with the divergent provider value parked beside it — réconcilié 2026-10-01 : issue #110 /
+PR #123), study update over time, change visibility.
 
 ### Journey 3 — Watching portfolio risk across banks (manual refresh, multi-portfolio)
 
@@ -447,7 +451,9 @@ outcomes.
   save/reopen/update.
 - **Data layer:** provider auto-fetch (agnostic; some providers keyless, key optional in OS
   keychain); per-cell coverage (present / to-fill / not-available-accepted) with gap highlighting;
-  first-class manual-entry surface; user-set **"validated"** flag (reset on change);
+  first-class manual-entry surface; user-set **"validated"** flag (a divergent refresh parks the
+  provider value beside a validated cell, never resets it — réconcilié 2026-10-01 : issue #110 /
+  PR #123);
   **5-year minimum → warn + low-confidence label**; reconciliation (manual wins, provider preserved);
   native-currency calc, FX consolidated only at the portfolio layer (dated FX).
 - **Charts/interaction:** growth/valuation charts, draggable judgment lines (gesture + exact value),
@@ -456,7 +462,8 @@ outcomes.
 - **Transactions & cost basis:** buy/sell **transaction ledger** (partial sells), per-transaction
   {date, type, quantity, unit execution price, fees, currency}; **weighted-average cost basis**.
 - **Dividends:** **gross** in the study (Section 5); **net** for the portfolio's reinvestable cash
-  (per-jurisdiction withholding; CH 35%); withholding-refund tracking = roadmap.
+  (one default withholding rate, CH 35%, configurable and overridable per entry — réconcilié
+  2026-10-01 : story 6.4); withholding-refund tracking = roadmap.
 - **Portfolio risk:** **multi-portfolio holdings register (one per bank, multi-currency)**; manual
   price refresh with displayed freshness; per-holding zones; trailing-stop **capital-at-risk per
   currency (native) → per-bank consolidation → global total in the single reference currency** (FX
@@ -740,10 +747,17 @@ withholding-refund tracking, export/share, eventual public release.
 ### Stock Study & Methodology Engine
 - FR1 **[P1]:** The user can create a Stock Study for a security.
 - FR2 **[P1]:** The user can persist and reopen a study with its full state intact.
-- FR3 **[P1]:** The user can update an existing study (re-fetch / edit) and extend its projection.
+- FR3 **[P1]:** The user can update an existing study (re-fetch / edit) and extend its projection
+  (moving the data window forward by a year; the projection horizon stays five years — réconcilié
+  2026-10-01 : story 2.11 scope decision, Guy 2026-06-14).
 - FR4 **[P1]:** The system computes the SSG output set (enumerated in Appendix A) deterministically
   from a study's inputs.
-- FR5 **[P1]:** All study calculations are performed in the security's native currency.
+- FR5 **[P1]:** All study calculations are performed in the security's native currency. A fetch whose
+  listing currency differs from the study's, or that is quoted in a currency's hundredths (GBX, GBp,
+  ZAc, ILA), is refused whole and named, nothing applied; statements reported in another currency
+  than the listing are applied with a named warning (réconcilié 2026-10-01 : PR #277).
+  Décision en attente (Guy) : comptes publiés dans une autre devise que la cotation — avertir (code
+  actuel, spec méthode §3) ou bloquer ; cotations en centièmes (GBX…) — refus actuel, ou conversion.
 - FR6 **[P1]:** The user can set judgment inputs (future growth, forecast P/E, low-price method) and
   see results recompute.
 - FR7 **[P1]:** The system raises methodology quality flags per the thresholds in Appendix A.
@@ -755,11 +769,16 @@ withholding-refund tracking, export/share, eventual public release.
   any deviation beyond a defined tolerance.
 - FR10 **[P1]:** The system detects and surfaces **input plausibility issues** (unadjusted split /
   series break, currency mismatch, fiscal-period misalignment, out-of-bound values per Appendix A)
-  as user-visible warnings, distinct from quality flags.
+  as user-visible warnings, distinct from quality flags. (The currency mismatch reaches the app since
+  PR #277, see FR5; the fiscal-period rule has no app input yet — p1-fr01-16 FR10, not reconciled
+  here.)
 - FR11 **[P1]:** The user can view a verdict's **traceability** — its inputs, their provenance, and
   the rule that produced the result.
 - FR12 **[P1]:** The verdict's presentation is **degraded or withheld testably** when a load-bearing
   input is not validated or the study is low-confidence (Appendix A defines "load-bearing input").
+  A fetched current price flagged stale by a failed refresh makes the verdict provisional, naming
+  « Prix actuel — périmé »; the price's origin (provider and session, or typed) is recorded and shown
+  in the traceability and the study PDF (réconcilié 2026-10-01 : PR #274, PR #286).
 - FR13 **[P1]:** All **app-generated** signals are **neutral** — no app output contains an
   action/recommendation verb from the banned-verb list in Appendix A (verifiable). AI-origin text is
   third-party content: always shown inside a frame labelled "AI" with the disclaimer, not subject to
@@ -781,7 +800,9 @@ withholding-refund tracking, export/share, eventual public release.
 - FR20 **[P1]:** Each cell (and the study as a whole) carries a **tri-state review tag** —
   `none` / `? to-review` / `✓ validated` — with a **soft-lock**: a `✓` cell must be explicitly
   un-validated (→ `?`) before its value can be edited, and a refresh that diverges from a validated
-  value auto-tags it `✓→?`. (Supersedes the original binary auto-reset wording; see GitHub issue #1.)
+  value keeps the `✓` and the value, and parks the provider value beside it as pending, for the owner
+  to accept or keep (réconcilié 2026-10-01 : issue #110 option b — PR #123, BEHAVIOR CHANGE; was
+  « auto-tags it `✓→?` »). (Supersedes the original binary auto-reset wording; see GitHub issue #1.)
   A validated AI value [P4] enters with review tag `?`, also on a `✓` cell without prior
   un-validation (FR74).
 - FR21 **[P1]:** The user can trigger a **manual refresh** of provider data; a refresh is
@@ -790,7 +811,10 @@ withholding-refund tracking, export/share, eventual public release.
   value is preserved (non-destructive reconciliation). A validated AI value [P4] reconciles as a
   manual value.
 - FR23 **[P1]:** On provider failure, last-known values are retained and affected data is flagged
-  **stale/to-update**.
+  **stale/to-update** — including a fetched current price (not one written the same day); a
+  successful refresh clears the flag (réconcilié 2026-10-01 : PR #274). Data becomes stale only on a
+  failed refresh: the age horizon of Appendix A is not implemented. Décision en attente (Guy) :
+  seuil d'âge du cours (« un jour de bourse » par défaut, réglable) — à implémenter ou à retirer.
 - FR24 **[P1]:** A provider failure's **cause** (network, quota/rate-limit, invalid/absent key) is
   recorded and reported.
 - FR25 **[P1]:** The user can use keyless providers, and **add/replace/delete/test** a provider API key
@@ -800,7 +824,8 @@ withholding-refund tracking, export/share, eventual public release.
 - FR27 **[P2]:** The system respects a provider's declared **quotas/rate-limits** and **batches**
   watchlist/portfolio fetches to stay within them.
 - FR28 **[P2]:** The system acquires, timestamps and retains **FX rates** per currency pair with a
-  freshness state; FX is applied only at consolidation.
+  freshness state; FX is applied only at consolidation. The freshness state is the rate's visible
+  date; no separate stale signal (réconcilié 2026-10-01 : story 6.6 AC2/AC4; issue #90 open).
 - FR29 **[P1]:** The system **recomputes deterministically** on a change of input, judgment, price, FX
   rate, or schema migration, distinguishing the cause.
 
@@ -809,7 +834,12 @@ withholding-refund tracking, export/share, eventual public release.
 - FR31 **[P1]:** The user can set a judgment line by **exact value or direct manipulation** (kept in
   sync), with live recalculation of zones.
 - FR32 **[P1]:** The user can undo judgment changes; adjusting a line never destroys a saved input.
-- FR33 **[P1]:** The system never auto-places or suggests a judgment line. **[P4]:** an AI-proposed
+- FR33 **[P1]:** The system never sets a judgment for the owner: an untouched judgment line starts
+  from a dimmed **derived seed** (least-squares line of EPS high/low on the growth chart, historical
+  average P/E on the valuation chart) and a one-click « hist. » value to adopt; a seed never feeds
+  the evaluation, the verdict or an alert until the owner sets or adopts the value (réconcilié
+  2026-10-01 : issue #121, PR #137, #213/#214; was « never auto-places or suggests a judgment
+  line »). **[P4]:** an AI-proposed
   judgment (FR72) is shown on the chart as a line annotated "AI" beside the owner's; while pending it
   changes no verdict, zone or alert. Once validated it becomes the study's judgment and keeps the
   annotation "placed by AI" with its validation date until the owner next moves or edits it.
@@ -829,7 +859,8 @@ withholding-refund tracking, export/share, eventual public release.
 - FR40 **[P1]:** The user can trigger a manual price refresh recomputing each holding's zone and showing
   freshness.
 - FR41 **[P2]:** The user can record **dividends**; the study uses gross, the portfolio's reinvestable
-  cash uses net per the withholding rule in Appendix A.
+  cash uses net per the withholding rule in Appendix A (one default rate, configurable, overridable
+  per entry — réconcilié 2026-10-01 : story 6.4).
 
 ### Risk Management
 - FR42 **[P1]:** The user can set a **trailing stop** per holding; it ratchets up only.
@@ -850,7 +881,11 @@ withholding-refund tracking, export/share, eventual public release.
   transactions. **[P4]:** study notes (FR78) and processed AI drafts are preserved in the study
   history.
 - FR50 **[P1]:** The user can reopen a past study and **visually compare** its recorded projection to
-  the security's actual trajectory since.
+  the security's actual trajectory since. The recorded projection is the frozen verdict's band, dated
+  the validation; a study never validated shows today's band, said as such and dated its creation
+  (réconcilié 2026-10-01 : PR #280). The trajectory holds the closes recorded at each refresh, no
+  backfill (story 5.1). Décision en attente (Guy) : une re-validation déplace la date de décision
+  (les décisions antérieures ne restent que dans l'historique).
 - FR51 **[P1]:** The system durably preserves the **time-series** of judgments, provenance, validation
   and rationale. **[P4]:** it also preserves study notes (FR78) and processed AI drafts.
 
@@ -876,15 +911,24 @@ withholding-refund tracking, export/share, eventual public release.
   preserves identity), enabling golden-study and seeding.
 - FR60 **[P1]:** The user can **export/import the whole journal** in a versioned format, validated on
   import (reject/migrate on version mismatch); the export and backups include AI drafts [P4]
-  (pending, validated, validated then undone, rejected).
+  (pending, validated, validated then undone, rejected). An older build refuses an export carrying
+  the drafts table; notes, AI marks and the frozen verdict, additive fields of the study, are dropped
+  by an older build without a refusal (réconcilié 2026-10-01 : D9 withdrawn 2026-09-27, story 8.1 —
+  corrects the « older builds refuse exports carrying notes/AI marks/drafts » of the G2 round-3 entry).
 - FR61 **[P1]:** The user can **restore from a backup** with integrity and version-compatibility checks
   before overwrite.
 - FR62 **[P1]:** The user can access **non-blocking contextual help / glossary** and a read-only
-  **demonstration study**.
+  **demonstration study**. Help is one glossary and legend hub in Réglages, not per-context (story
+  2.13 scope decision 2); the demonstration is offered on the empty study list and beside « Créer une
+  étude… » once studies exist, every writing gesture disabled on it (réconcilié 2026-10-01 : PR #279,
+  PR #284).
 
 ### Configuration, Posture & Operation
 - FR63 **[P1]:** The user can configure providers/keys, the single global reference currency, risk
   thresholds, the label set (NAIC↔neutral) and locale number format — without a blocking setup flow.
+  Every zone noun on screen follows the active label set, except the Comparison screen and the PDFs,
+  neutral whatever the set (owner decision 2026-09-26) (réconcilié 2026-10-01 : PR #275).
+  Décision en attente (Guy) : Comparaison et PDF en vocabulaire neutre, face à FR63 — à confirmer.
 - FR64 **[P1]:** A disclaimer (educational, not a financial advisor) is **always visible** — including
   in the draft inbox and beside every AI-origin item [P4]; the app's own outputs never issue
   recommendations, and AI proposals are always labelled as such.
@@ -897,14 +941,21 @@ withholding-refund tracking, export/share, eventual public release.
   per-machine app-config (via `directories`), **never inside the journal**. A **single-instance lock**
   guards the open journal. The app **detects a sync folder** (Synology/Dropbox/OneDrive/iCloud) and
   warns, keeping the **live DB local** with **versioned backups** to the sync folder (SQLite
-  `journal_mode=DELETE/TRUNCATE`). (New requirement; arch ADD7/ADD8; GitHub issue #2.) **[P4]:** draft
+  `journal_mode=DELETE/TRUNCATE`). As delivered, the journal opens in place in `DELETE` mode and the
+  local-DB-plus-backups scheme is a recommendation in the warning; backups are manual, beside the
+  journal (réconcilié 2026-10-01 : story 5.5 scope decision). (New requirement; arch ADD7/ADD8; GitHub issue #2.) **[P4]:** draft
   writes arriving through MCP never corrupt or race the open session.
-- FR68 **[P1]:** The **decision-time verdict is frozen and immutable** — stamped with `method_version`,
-  dated FX and the exact inputs — and is the **only verdict persisted**. A "recompute with today's
-  method" verdict is produced **on demand** for comparison/debug, **never persisted and never
-  automatic**. On a `method_version` change the UI offers a labelled
-  **"frozen (vNN, DD/MM) vs recomputed (vMM, today)"** compare. (New requirement; arch ADD10; GitHub
-  issue #3.) **Decision time (owner, 2026-09-27):** the verdict is frozen when the owner **validates
+- FR68 **[P4]:** The **decision-time verdict is frozen and immutable** — stamped with
+  `method_version`, the `inputs_hash`, the exact load-bearing inputs and the date (a study verdict
+  involves no FX, NFR-C4; "dated FX" applies only if a consolidated figure is ever frozen) — and is
+  the **only verdict persisted**. The current verdict is **always computed live** and shown, never
+  persisted; whenever it differs from the frozen one (facts, `inputs_hash` or `method_version`) the
+  study shows both, labelled « figé (<method_version>, <date>) » and « actuel (<method_version>,
+  aujourd'hui | provisoire | retenu) », e.g. « figé (ssg-1.2.0, 30/09) » on screen (réconcilié
+  2026-10-01 : D11 / architecture A13 / story 8.8 decision 1; delivered in Epic 8 [P4], was
+  labelled [P1]; was « recomputed on demand, never automatic, compare offered on a `method_version`
+  change »). (New requirement; arch ADD10; GitHub issue #3.) **Decision time (owner, 2026-09-27):**
+  the verdict is frozen when the owner **validates
   the study** with an explicit action, available only when the verdict is full (every load-bearing
   input `✓`); validating again later replaces the frozen verdict, the previous one stays in the study
   history (FR51). Whenever the current verdict later differs from the frozen one — after a refresh,
@@ -1079,10 +1130,12 @@ withholding-refund tracking, export/share, eventual public release.
 - **"Usable year" / low-confidence (FR8):** a year with all load-bearing fields present (sales, EPS,
   high/low price); **study is low-confidence when usable years < 5**.
 - **Cost basis (FR39):** weighted-average, **fees included**.
-- **Dividend net (FR41):** `gross × (1 − withholding_rate)`, rate per jurisdiction (CH = 35%);
-  study uses gross.
+- **Dividend net (FR41):** `gross × (1 − withholding_rate)`, one default rate (CH impôt anticipé =
+  35%), configurable in Réglages and overridable per entry; per-jurisdiction rate tables out of scope
+  (réconcilié 2026-10-01 : story 6.4); study uses gross.
 - **Stale threshold (FR23):** price data older than the user-configured horizon (default: older than
-  one trading day) is flagged stale.
+  one trading day) is flagged stale. Décision en attente (Guy) : ce seuil d'âge n'est pas implémenté
+  — aujourd'hui seul un rafraîchissement en échec rend un cours périmé (PR #274).
 - **Neutrality (FR13):** app-generated signals contain **no imperative action verb** (buy/sell/
   hold as a command); they state facts only. (Exact banned-verb list finalized in Architecture.)
   Scope rule: AI-origin text is outside the banned-verb gate; it is always shown inside a frame

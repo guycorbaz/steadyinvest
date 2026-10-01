@@ -54,7 +54,9 @@ stale on arrival. Read failures state « indisponible », never an empty section
    - the **quality flags** as named facts (the nine `QualityFlagKey`s in the app's neutral
      wording: « marge avant impôt en baisse », « ROE en baisse », « ROE < 10 % », « BPA en
      retard sur les ventes », « PER haut jugé > 20 / > 25 », « H/B < 3 / > 20 »,
-     « valeur relative ≥ 100 % ») — count + the list on the row;
+     « valeur relative ≥ 100 % ») — count + the list on the row; of the two high-P/E flags only
+     the higher threshold is shown (owner decision 2026-09-26; one rule `core::ssg::shown_quality_flags`
+     shared with the study screen and MCP) (réconcilié 2026-10-01 : PR #285);
    - the data state: « périmé » / « à jour le … » (the refresh freshness), the trailing stop and
      whether it is breached, an open trigger.
    Ordered by invested share, largest first. Sold positions excluded.
