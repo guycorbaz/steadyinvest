@@ -865,6 +865,11 @@ fn price_earnings_section(
             EM_DASH,
             EM_DASH,
         ));
+    // FR11 (Guy's on-screen test, deferred from #274): the price's origin, as the traceability
+    // states it — only when recorded (an older study prints nothing more: the pins hold).
+    if let Some(origin) = price_origin_line(study) {
+        notes.small_line(&origin);
+    }
     let body_refs: Vec<Vec<&str>> = body
         .iter()
         .map(|r| r.iter().map(String::as_str).collect())
@@ -1415,6 +1420,31 @@ fn jj_mm_aaaa(ts: &str) -> String {
     }
 }
 
+/// FR11 (2026-10-01): « Origine du cours actuel : fournisseur, séance du JJ/MM/AAAA » (or the fetch
+/// date), « manuel, saisi le … », « — périmé » after a failed refresh; `None` when not recorded.
+fn price_origin_line(study: &Study) -> Option<String> {
+    use steadyinvest_contract::{Freshness, Source};
+    study.judgment.current_price?;
+    let o = study.judgment.current_price_origin.as_ref()?;
+    let what = match (o.source, &o.session_date) {
+        (Source::Provider, Some(session)) => PRICE_FROM_SESSION.replace("{}", &jj_mm_aaaa(session)),
+        (Source::Provider, None) => PRICE_FETCHED_ON.replace("{}", &jj_mm_aaaa(&o.at.0)),
+        (Source::Manual, _) => PRICE_TYPED_ON.replace("{}", &jj_mm_aaaa(&o.at.0)),
+        (Source::Derived, _) => return None,
+    };
+    let stale = if o.freshness == Freshness::Stale {
+        PRICE_STALE
+    } else {
+        ""
+    };
+    Some(format!("{PRICE_ORIGIN} {what}{stale}"))
+}
+const PRICE_ORIGIN: &str = "Origine du cours actuel :";
+const PRICE_FROM_SESSION: &str = "fournisseur, séance du {}";
+const PRICE_FETCHED_ON: &str = "fournisseur, récupéré le {}";
+const PRICE_TYPED_ON: &str = "manuel, saisi le {}";
+const PRICE_STALE: &str = " — périmé";
+
 /// FR7 (2026-10-01): the label of the quality-flags line of the Synthèse.
 const FLAGS_LINE: &str = "Signaux de qualité :";
 const FROZEN_ON: &str = "Verdict figé le";
@@ -1609,6 +1639,11 @@ const REPORT_USER_FACING: &[&str] = &[
     "9 · C/B actuel :",
     "valeur relative :",
     "Cours actuel :",
+    PRICE_ORIGIN,
+    PRICE_FROM_SESSION,
+    PRICE_FETCHED_ON,
+    PRICE_TYPED_ON,
+    PRICE_STALE,
     "plus haut de l'année en cours :",
     "plus bas de l'année en cours :",
     // §4.
@@ -5206,5 +5241,34 @@ mod tests {
             assert!(!contains(&pages[0], part), "left behind: {part}");
             assert!(contains(&pages[1], part), "not with its section: {part}");
         }
+    }
+
+    // FR11 (2026-10-01): the price's origin under « Cours actuel », only when recorded.
+    #[test]
+    fn the_price_origin_is_printed_when_recorded() {
+        use steadyinvest_contract::{Freshness, PriceOrigin, Source, Timestamp};
+        let mut study = demo_study();
+        study.judgment.current_price_origin = Some(PriceOrigin {
+            source: Source::Provider,
+            at: Timestamp("2026-10-01T09:00:00Z".to_string()),
+            session_date: Some("2026-09-30".to_string()),
+            freshness: Freshness::Stale,
+        });
+        let bytes = render_study_pdf(&study, NumberStyle::Comma).unwrap();
+        assert!(contains(
+            &bytes,
+            "Origine du cours actuel : fournisseur, séance du 30/09/2026 — périmé"
+        ));
+        study.judgment.current_price_origin = Some(PriceOrigin {
+            source: Source::Manual,
+            at: Timestamp("2026-10-01T09:00:00Z".to_string()),
+            session_date: None,
+            freshness: Freshness::Current,
+        });
+        let bytes = render_study_pdf(&study, NumberStyle::Comma).unwrap();
+        assert!(contains(
+            &bytes,
+            "Origine du cours actuel : manuel, saisi le 01/10/2026"
+        ));
     }
 }
