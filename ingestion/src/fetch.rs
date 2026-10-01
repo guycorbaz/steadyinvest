@@ -20,6 +20,10 @@ use crate::provider::{DatedClose, MarketDataProvider, RawFetch};
 #[derive(Debug, Clone)]
 pub struct FetchedFinancials {
     pub canonical: CanonicalFinancials,
+    /// The provider's listing currency of the symbol (EODHD `General.CurrencyCode`) — what the
+    /// prices are quoted in; checked against the study's currency before anything is applied
+    /// (FR5 / FR10, project review 2026-10-01). `normalize` does not carry it.
+    pub native_currency: String,
     pub digest: String,
     pub latest_price: Option<Decimal>,
     /// Issue #72: the trading-session date of `latest_price` (see [`RawFetch::latest_session_date`]),
@@ -156,10 +160,12 @@ pub async fn fetch_canonical(
         ttm_eps,
         sector,
     } = provider.fetch_fundamentals(ticker, api_key).await?;
+    let native_currency = financials.native_currency.clone();
     let canonical = normalize(financials)?;
     let digest = dependency_digest(provider.tag(), ticker, &canonical);
     Ok(FetchedFinancials {
         canonical,
+        native_currency,
         digest,
         latest_price,
         latest_session_date,

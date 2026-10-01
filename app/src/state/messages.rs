@@ -277,6 +277,12 @@ pub const MSG_TICKER_CONVENTION: &str = "Le symbole s'écrit SYMBOLE.PLACE selon
 /// …and, for a suffix of another common convention, the app's spelling of the same listing.
 pub const MSG_TICKER_SUGGESTION: &str =
     "Dans la convention de l'application, {ticker} s'écrit {suggestion}.";
+/// FR5 / FR10 (project review 2026-10-01): the provider quotes the symbol in another currency than
+/// the study's — its figures would be read in the wrong currency (a silent false signal).
+pub const MSG_CURRENCY_STUDY_MISMATCH: &str = "Le fournisseur donne {ticker} en {provider}, l'étude est en {study} ; une étude se tient dans la devise de ses chiffres, rien n'a été appliqué.";
+/// FR5 / FR10: the provider's statements are in another currency than the listing's prices — the
+/// P/E, zones and ratios would mix two currencies without conversion.
+pub const MSG_CURRENCY_MIXED: &str = "Le fournisseur publie les comptes de {ticker} dans une autre devise que sa cotation ({listing}) ; sans conversion, les chiffres ne sont pas comparables : rien n'a été appliqué.";
 /// G1 H (#237, owner decision 10): the share-split history could not be read, so the fetch is
 /// refused whole (no price at a wrong scale) — named apart from the fundamentals / prices
 /// failures. The plan-excludes-it (403) and usage-limit (429) causes keep their own wording; any
@@ -1101,6 +1107,37 @@ pub fn provider_failure_notice_with_hint(
     }
 }
 
+/// FR5 / FR10 (project review 2026-10-01): the refusal of a fetch whose currencies do not match —
+/// the listing currency ≠ the study's (`expected`), or statements reported in another currency than
+/// the listing's (`normalize`'s `currency_mismatch` findings). `None` when the figures can be read
+/// in `expected`. Case-insensitive on the codes.
+pub fn currency_refusal(
+    ticker: &str,
+    expected: &str,
+    fetched: &steadyinvest_ingestion::FetchedFinancials,
+) -> Option<String> {
+    let listing = fetched.native_currency.trim().to_ascii_uppercase();
+    let expected = expected.trim().to_ascii_uppercase();
+    if !listing.is_empty() && listing != expected {
+        return Some(
+            MSG_CURRENCY_STUDY_MISMATCH
+                .replace("{ticker}", ticker)
+                .replace("{provider}", &listing)
+                .replace("{study}", &expected),
+        );
+    }
+    let mixed = fetched
+        .canonical
+        .findings
+        .iter()
+        .any(|f| f.key == steadyinvest_core::normalize::PlausibilityKey::CurrencyMismatch);
+    mixed.then(|| {
+        MSG_CURRENCY_MIXED
+            .replace("{ticker}", ticker)
+            .replace("{listing}", &listing)
+    })
+}
+
 /// PURE: the key test's verdict (Story 3.2) for Réglages — a statement about the KEY, cause-named.
 /// Issue #42: a quota proves acceptance, a network cut is inconclusive; a 403 is a valid key on a
 /// plan that does not cover the data. G1 H review: a failure of EODHD's `/splits` (reached only
@@ -1323,6 +1360,8 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_PROVIDER_NO_DATA,
     MSG_TICKER_CONVENTION,
     MSG_TICKER_SUGGESTION,
+    MSG_CURRENCY_STUDY_MISMATCH,
+    MSG_CURRENCY_MIXED,
     MSG_REFRESH_NOCHANGE,
     MSG_REFRESH_PRICE,
     MSG_REFRESH_INPUT,

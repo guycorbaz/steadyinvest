@@ -352,6 +352,22 @@ pub fn map_eodhd(
             currency: currency.clone(),
         })
     };
+    // FR5 / FR10 (project review 2026-10-01): a statement row may report its OWN currency
+    // (`currency_symbol` — a company listed in CHF that reports in USD). Its amounts carry that
+    // currency, so `normalize`'s `currency_mismatch` sees the difference instead of a USD figure
+    // labelled CHF; without the field, the listing currency as before. Prices stay in the listing
+    // currency (the `/eod` series).
+    let stmt_amount = |row: Option<&Value>, d: Option<Decimal>| {
+        let row_currency = row
+            .and_then(|r| r.get("currency_symbol"))
+            .and_then(Value::as_str)
+            .filter(|c| c.len() == 3 && c.bytes().all(|b| b.is_ascii_uppercase()))
+            .map(str::to_string);
+        d.map(|value| RawAmount {
+            value,
+            currency: row_currency.unwrap_or_else(|| currency.clone()),
+        })
+    };
 
     let years = years_set
         .keys()
@@ -375,19 +391,19 @@ pub fn map_eodhd(
                     .zip(calendar.as_ref())
                     .and_then(|(end, cal)| cal.period_months(end)),
                 fiscal_year_end_month: reported_end.map(fiscal_year_end_month),
-                sales: amount(field_dec(inc, "totalRevenue")),
+                sales: stmt_amount(inc, field_dec(inc, "totalRevenue")),
                 // ssg-1.2.0: the REPORTED diluted EPS, never `Earnings.Annual.epsActual`.
-                eps: amount(reported_diluted_eps(income, balance, y)),
+                eps: stmt_amount(inc, reported_diluted_eps(income, balance, y)),
                 high_price: amount(highs.get(&y).copied()),
                 low_price: amount(lows.get(&y).copied()),
                 // Issue #112: per-share dividend for the fiscal year — the cash-flow `dividendsPaid`
                 // (total, same yearly statement → aligned to the fiscal year, no ex-date guessing)
                 // over shares outstanding. `None` when either is absent (a non-payer or a gap).
-                dividend_per_share: amount(dividend_per_share(cash, bal)),
-                pre_tax_profit: amount(field_dec(inc, "incomeBeforeTax")),
-                net_profit: amount(field_dec(inc, "netIncome")),
+                dividend_per_share: stmt_amount(cash, dividend_per_share(cash, bal)),
+                pre_tax_profit: stmt_amount(inc, field_dec(inc, "incomeBeforeTax")),
+                net_profit: stmt_amount(inc, field_dec(inc, "netIncome")),
                 tax_rate: None, // pre_tax_profit is reported directly → no gross-up needed
-                book_value_per_share: amount(book_value_per_share(bal)),
+                book_value_per_share: stmt_amount(bal, book_value_per_share(bal)),
             }
         })
         .collect();
@@ -1171,5 +1187,42 @@ mod tests {
             Some("prior")
         );
         assert!(year_row(obj, 2021).is_none());
+    }
+
+    // FR5 / FR10 (project review 2026-10-01): a statement row's own currency is carried on its
+    // amounts; without it, the listing currency; prices always in the listing currency.
+    #[test]
+    fn statement_amounts_carry_their_rows_own_currency() {
+        let fundamentals = json!({
+            "General": { "CurrencyCode": "CHF" },
+            "Financials": {
+                "Income_Statement": { "yearly": {
+                    "2023-12-31": { "totalRevenue": "45000000000", "incomeBeforeTax": "9000000000", "currency_symbol": "USD" },
+                    "2024-12-31": { "totalRevenue": "50000000000", "incomeBeforeTax": "10000000000" },
+                } },
+                "Balance_Sheet": { "yearly": {
+                    "2023-12-31": { "totalStockholderEquity": "40000000000", "commonStockSharesOutstanding": "2000000000", "currency_symbol": "usd" },
+                } },
+            }
+        });
+        let fin = map_eodhd(&fundamentals, &json!([]), &json!([]), day(), "NOVN.SW").expect("maps");
+        let y = |year: i32| fin.years.iter().find(|y| y.year == year).expect("year");
+        assert_eq!(
+            y(2023).sales.as_ref().unwrap().currency,
+            "USD",
+            "the row's own currency"
+        );
+        assert_eq!(y(2023).pre_tax_profit.as_ref().unwrap().currency, "USD");
+        assert_eq!(
+            y(2024).sales.as_ref().unwrap().currency,
+            "CHF",
+            "no field: the listing's"
+        );
+        // A malformed code (lower-case) is not trusted: the listing currency stands.
+        assert_eq!(
+            y(2023).book_value_per_share.as_ref().unwrap().currency,
+            "CHF"
+        );
+        assert_eq!(fin.native_currency, "CHF");
     }
 }

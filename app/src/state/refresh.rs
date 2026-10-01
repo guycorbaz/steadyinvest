@@ -81,6 +81,14 @@ impl JournalState {
         study_id: Uuid,
         fetched: &FetchedFinancials,
     ) -> Result<RefreshReport, String> {
+        // FR5 / FR10 (project review 2026-10-01): never apply figures in another currency than the
+        // study's — refused whole, named (a silent false signal otherwise).
+        if let Some(study) = self.get_study(study_id)
+            && let Some(refusal) =
+                super::currency_refusal(&study.security_ticker, &study.native_currency, fetched)
+        {
+            return Err(refusal);
+        }
         let provenance = self.provider_provenance(fetched.digest.clone());
         // Issue #109: the analysis uses COMPLETE fiscal years only, and the SSG history window.
         // 1) Drop the in-progress current year: a provider's `/eod` contributes a price-only row for
