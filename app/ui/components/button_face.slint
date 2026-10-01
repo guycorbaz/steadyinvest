@@ -1,6 +1,6 @@
 // The face of every button and chip (Guy's on-screen test, 2026-10-01: buttons were hard to see
 // and a press left no doubt-free trace; then « passe au relief net »). A clear relief — a light top
-// edge, a lighter rim and a 2 px dark base — that SINKS by 2 px when pressed (mouse or keyboard) or while a toggle is selected:
+// edge, a lighter rim and a 3 px dark base — that SINKS by 3 px when pressed (mouse or keyboard) or while a toggle is selected:
 // the shadow goes, the fill darkens. Disabled = flat. The outer box keeps its height, so a press
 // never moves the layout; only the face moves inside it. No hue is spent (NFR-U1): ink and the
 // theme's own surfaces only.
@@ -43,7 +43,7 @@ export component ButtonFace inherits Rectangle {
         border-radius: Tokens.radius;
         // Raised: a slight top-to-bottom shading so the face reads as standing out; sunk: flat dark.
         background: root.down ? root.sunk-fill
-            : root.raised ? @linear-gradient(180deg, root.fill.brighter(0.25) 0%, root.fill 100%)
+            : root.raised ? @linear-gradient(180deg, root.fill.brighter(0.4) 0%, root.fill 100%)
             : root.fill;
         border-width: root.focused ? Tokens.focus-border : Tokens.border;
         border-color: root.focused ? Tokens.focus : root.edge;

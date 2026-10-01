@@ -101,14 +101,14 @@ export global Tokens {
     out property <int> weight-semibold: 600;
     // Elevation: 1 px borders; buttons alone carry a clear relief (Guy's on-screen test,
     // 2026-10-01: « que les boutons aient un aspect 3D et s'enfoncent quand on appuie », then
-    // « passe au relief net »): a light top edge, a 2 px dark base under the face, a lighter rim;
-    // pressed or selected, the face sinks 2 px onto its base. Derived from the theme, never a hue.
+    // « passe au relief net »): a light top edge, a 3 px dark base under the face, a lighter rim;
+    // pressed or selected, the face sinks 3 px onto its base (« légèrement plus marqués »). Derived from the theme, never a hue.
     out property <color> relief-shadow: root.dark ? #000000 : #8f96a3;
-    out property <color> relief-light: root.dark ? #ffffff4d : #ffffff;
-    out property <color> relief-edge: root.dark ? #3d4350 : #b3bac6;
+    out property <color> relief-light: root.dark ? #ffffff6b : #ffffff;
+    out property <color> relief-edge: root.dark ? #4a5160 : #a7afbc;
     // The fill of a pressed (or selected, sunk) face: clearly darker than its rest fill.
     out property <color> relief-pressed: root.dark ? #0c0d11 : #d6dae1;
-    out property <length> relief: 2px;
+    out property <length> relief: 3px;
     out property <length> border: 1px;
     out property <length> focus-border: 2px;
     out property <length> radius: 4px;
