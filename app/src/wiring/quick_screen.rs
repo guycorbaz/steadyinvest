@@ -450,7 +450,14 @@ pub(crate) fn on_fetched(
         // Guy's on-screen test (2026-10-01): an unknown symbol names the convention / a suggestion,
         // from the symbol asked for (never from the last error of a provider chain).
         Ok(fetched) if !has_analysis_years(&fetched) => Err(state::no_data_notice(&outcome.ticker)),
-        Ok(fetched) => Ok(fetched),
+        // FR5 / FR10 (project review 2026-10-01): figures in another currency than the one picked
+        // are never shown as if they were in it — refused by name, like a study refresh.
+        Ok(fetched) => {
+            match state::currency_refusal(&outcome.ticker, &outcome.currency, &fetched, false) {
+                Some(refusal) => Err(refusal),
+                None => Ok(fetched),
+            }
+        }
         Err(error) => Err(state::provider_failure_notice_with_hint(
             &error,
             &outcome.ticker,

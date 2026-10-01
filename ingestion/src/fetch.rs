@@ -20,6 +20,14 @@ use crate::provider::{DatedClose, MarketDataProvider, RawFetch};
 #[derive(Debug, Clone)]
 pub struct FetchedFinancials {
     pub canonical: CanonicalFinancials,
+    /// The provider's listing currency of the symbol (EODHD `General.CurrencyCode`) — what the
+    /// prices are quoted in; checked against the study's currency before anything is applied
+    /// (FR5 / FR10, project review 2026-10-01). `normalize` does not carry it.
+    pub native_currency: String,
+    /// The currency the provider REPORTS the statements in, when it differs from the listing's
+    /// (a company listed in CHF that reports in USD) — per fiscal year, from the raw amounts; for
+    /// a warning that names both currencies. Empty when the statements are in the listing currency.
+    pub reported_currencies: Vec<(i32, String)>,
     pub digest: String,
     pub latest_price: Option<Decimal>,
     /// Issue #72: the trading-session date of `latest_price` (see [`RawFetch::latest_session_date`]),
@@ -156,16 +164,37 @@ pub async fn fetch_canonical(
         ttm_eps,
         sector,
     } = provider.fetch_fundamentals(ticker, api_key).await?;
+    let native_currency = financials.native_currency.clone();
+    let reported_currencies = reported_currencies(&financials);
     let canonical = normalize(financials)?;
     let digest = dependency_digest(provider.tag(), ticker, &canonical);
     Ok(FetchedFinancials {
         canonical,
+        native_currency,
+        reported_currencies,
         digest,
         latest_price,
         latest_session_date,
         ttm_eps,
         sector,
     })
+}
+
+/// PURE: per fiscal year, the currency the statements are reported in when it is not the listing
+/// currency (FR10, G3 review 2026-10-01) — read off the raw amounts before `normalize` drops them.
+pub fn reported_currencies(financials: &steadyinvest_core::RawFinancials) -> Vec<(i32, String)> {
+    financials
+        .years
+        .iter()
+        .filter_map(|y| {
+            [&y.sales, &y.eps, &y.pre_tax_profit, &y.net_profit]
+                .into_iter()
+                .flatten()
+                .map(|a| a.currency.as_str())
+                .find(|c| *c != financials.native_currency)
+                .map(|c| (y.year, c.to_string()))
+        })
+        .collect()
 }
 
 /// Fetch ONLY the latest market price (issue #50) — the holdings price-refresh path. No
@@ -593,5 +622,32 @@ mod tests {
             fetch_price(&err, "AAPL.US", None).await.unwrap_err(),
             IngestionError::Provider(ProviderError::InvalidOrAbsentKey)
         ));
+    }
+
+    #[test]
+    fn reported_currencies_name_the_years_reported_in_another_currency() {
+        use steadyinvest_core::normalize::{RawAmount, RawFinancials, RawYear};
+        let amt = |c: &str| {
+            Some(RawAmount {
+                value: rust_decimal::Decimal::new(1, 0),
+                currency: c.to_string(),
+            })
+        };
+        let raw = RawFinancials {
+            native_currency: "CHF".to_string(),
+            years: vec![
+                RawYear {
+                    sales: amt("USD"),
+                    high_price: amt("CHF"),
+                    ..RawYear::empty(2023)
+                },
+                RawYear {
+                    sales: amt("CHF"),
+                    ..RawYear::empty(2024)
+                },
+            ],
+            splits: vec![],
+        };
+        assert_eq!(reported_currencies(&raw), vec![(2023, "USD".to_string())]);
     }
 }

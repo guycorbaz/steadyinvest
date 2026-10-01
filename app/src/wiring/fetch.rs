@@ -350,6 +350,22 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                                     // (Story 3.6), the re-validation scope ("N à revérifier").
                                     // Story 6.9 (FR26): a fallback names itself alongside.
                                     let mut notice = state::refresh_summary(report);
+                                    // FR10 (G3 review): statements in another currency than the
+                                    // listing — a named warning beside the outcome, never a block.
+                                    let ticker = journal_state
+                                        .borrow()
+                                        .get_study(outcome.study_id)
+                                        .map(|s| s.security_ticker)
+                                        .unwrap_or_default();
+                                    let applied: Vec<i32> = state::analysis_years(&fetched)
+                                        .iter()
+                                        .map(|y| y.year)
+                                        .collect();
+                                    if let Some(warning) =
+                                        state::currency_warning(&ticker, &fetched, &applied)
+                                    {
+                                        notice = format!("{notice} {warning}");
+                                    }
                                     if let Some(effective) = outcome.fell_back_to {
                                         notice = format!(
                                             "{notice} {}",
@@ -361,7 +377,10 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                                     render_open();
                                     say(false, &notice);
                                 }
-                                Err(message) => say(true, &message),
+                                Err(message) => {
+                                    tracing::warn!(study_id = %outcome.study_id, "study refresh refused");
+                                    say(true, &message);
+                                }
                             }
                         }
                         // Story 3.5 (FR23/FR24/NFR-R1): name the cause, RETAIN last-known values, and

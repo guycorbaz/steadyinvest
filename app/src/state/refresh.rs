@@ -81,6 +81,19 @@ impl JournalState {
         study_id: Uuid,
         fetched: &FetchedFinancials,
     ) -> Result<RefreshReport, String> {
+        // FR5 / FR10 (project review 2026-10-01): never apply figures in another currency than the
+        // study's — refused whole, named (a silent false signal otherwise).
+        if let Some(study) = self.get_study(study_id)
+            && let Some(refusal) = super::currency_refusal(
+                &study.security_ticker,
+                &study.native_currency,
+                fetched,
+                true,
+            )
+        {
+            tracing::warn!(ticker = %study.security_ticker, "refresh refused: listing currency is not the study's");
+            return Err(refusal);
+        }
         let provenance = self.provider_provenance(fetched.digest.clone());
         // Issue #109: the analysis uses COMPLETE fiscal years only, and the SSG history window.
         // 1) Drop the in-progress current year: a provider's `/eod` contributes a price-only row for
@@ -91,12 +104,7 @@ impl JournalState {
         //    core::normalize sorts them — so drop the oldest overflow). Filtering BEFORE the cap means
         //    a dropped partial current year is replaced by an older complete one, not left short.
         // Matches the manual materialized window (which already excludes the current year).
-        let mut years: Vec<CanonicalYear> = fetched.canonical.years.clone();
-        years.retain(|cy| cy.sales.is_some());
-        let window = crate::viewmodel::entry::YEAR_WINDOW;
-        if years.len() > window {
-            years.drain(0..years.len() - window);
-        }
+        let years = analysis_years(fetched);
         // Issue #37 (Finding 5): the provider's complete years, captured BEFORE the closure moves
         // `years` — used after the mutation to count those that fell outside the grid (not integrated).
         let provider_year_nums: Vec<i32> = years.iter().map(|cy| cy.year).collect();
@@ -380,6 +388,19 @@ fn year_cells_mut(year: &mut YearData) -> Vec<&mut Cell> {
 
 /// How many provider cells of `study` are not yet `Stale` — the [`JournalState::mark_provider_stale`]
 /// pre-check (a `&Study` read, no mutation), so a no-op failure writes no journal revision.
+/// The provider years a refresh applies (issue #109): complete fiscal years only (a year without
+/// `sales` is the one in progress), the most recent `YEAR_WINDOW` of them. Shared with the
+/// currency warning, which concerns only the years applied (G3 review).
+pub(crate) fn analysis_years(fetched: &FetchedFinancials) -> Vec<CanonicalYear> {
+    let mut years: Vec<CanonicalYear> = fetched.canonical.years.clone();
+    years.retain(|cy| cy.sales.is_some());
+    let window = crate::viewmodel::entry::YEAR_WINDOW;
+    if years.len() > window {
+        years.drain(0..years.len() - window);
+    }
+    years
+}
+
 fn count_provider_to_stale(study: &Study, today: &Timestamp) -> usize {
     study
         .years

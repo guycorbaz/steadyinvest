@@ -156,11 +156,22 @@ fn fetched_custom(
     };
     FetchedFinancials {
         canonical: normalize(raw).expect("the test raw normalizes"),
+        native_currency: "CHF".to_string(),
+        reported_currencies: Vec::new(),
         digest: digest.to_string(),
         latest_price: None,
         latest_session_date: None,
         ttm_eps: None,
         sector: None,
+    }
+}
+
+/// [`fetched_for`] quoted in `currency` (FR5 / FR10: a refresh is refused unless the listing
+/// currency is the study's).
+fn fetched_in(years: &[i32], currency: &str) -> FetchedFinancials {
+    FetchedFinancials {
+        native_currency: currency.to_string(),
+        ..fetched_for(years)
     }
 }
 
@@ -294,6 +305,8 @@ fn provider_fetch_drops_the_in_progress_year_without_annual_statements() {
             splits: vec![],
         })
         .expect("normalizes"),
+        native_currency: "CHF".to_string(),
+        reported_currencies: Vec::new(),
         digest: "d109".to_string(),
         latest_price: None,
         latest_session_date: None,
@@ -1409,7 +1422,7 @@ fn a_confirming_refresh_restamps_figures_fetched_under_an_earlier_method() {
     let id = state.create_study("NVDA.US", "USD").unwrap();
     let years = [2021, 2022, 2023, 2024, 2025];
     state
-        .apply_provider_refresh(id, &fetched_for(&years))
+        .apply_provider_refresh(id, &fetched_in(&years, "USD"))
         .unwrap();
     assert_eq!(
         provider_figures_predating_method(&state.get_study(id).unwrap()),
@@ -1429,7 +1442,7 @@ fn a_confirming_refresh_restamps_figures_fetched_under_an_earlier_method() {
     );
 
     let report = state
-        .apply_provider_refresh(id, &fetched_for(&years))
+        .apply_provider_refresh(id, &fetched_in(&years, "USD"))
         .unwrap();
     assert!(!report.changed(), "equal values: no figure moved");
     assert_eq!(report.method_changed, 0);
@@ -1448,7 +1461,7 @@ fn a_confirming_refresh_restamps_figures_fetched_under_an_earlier_method() {
     // Idempotent from there on: a second confirming refresh is a true no-op again.
     let depth = state.undo_depth();
     state
-        .apply_provider_refresh(id, &fetched_for(&years))
+        .apply_provider_refresh(id, &fetched_in(&years, "USD"))
         .unwrap();
     assert_eq!(state.undo_depth(), depth, "no churn once re-stamped");
 }
@@ -1463,7 +1476,7 @@ fn a_changing_refresh_names_the_method_for_figures_fetched_before_it() {
     let id = state.create_study("NVDA.US", "USD").unwrap();
     let years = [2021, 2022, 2023, 2024, 2025];
     state
-        .apply_provider_refresh(id, &fetched_for(&years))
+        .apply_provider_refresh(id, &fetched_in(&years, "USD"))
         .unwrap();
     unstamp_provider_cells(&mut state, id);
     state
@@ -1477,7 +1490,13 @@ fn a_changing_refresh_names_the_method_for_figures_fetched_before_it() {
 
     // EPS 5 → 7 everywhere (as the reported EPS replaced the adjusted one).
     let report = state
-        .apply_provider_refresh(id, &fetched_custom(&years, 1000, 7, 100, 50, "feed0252"))
+        .apply_provider_refresh(
+            id,
+            &FetchedFinancials {
+                native_currency: "USD".to_string(),
+                ..fetched_custom(&years, 1000, 7, 100, 50, "feed0252")
+            },
+        )
         .unwrap();
     assert_eq!(report.updated, 4, "four unvalidated EPS changed");
     assert_eq!(report.contradicted, 1, "the validated EPS is contradicted");
@@ -1493,7 +1512,13 @@ fn a_changing_refresh_names_the_method_for_figures_fetched_before_it() {
     // G3: the same contradicting fetch again never re-stamps the validated ✓ 5 — it was not
     // confirmed (the provider says 7): it stays « fetched before ».
     state
-        .apply_provider_refresh(id, &fetched_custom(&years, 1000, 7, 100, 50, "feed0252"))
+        .apply_provider_refresh(
+            id,
+            &FetchedFinancials {
+                native_currency: "USD".to_string(),
+                ..fetched_custom(&years, 1000, 7, 100, 50, "feed0252")
+            },
+        )
         .unwrap();
     let eps0 = state.get_study(id).unwrap().years[0].eps.clone();
     assert_eq!(eps0.value, Some(und_money(5)));
@@ -6820,7 +6845,7 @@ fn banded_study(
 ) -> Uuid {
     let id = state.create_study(ticker, currency).unwrap();
     state
-        .apply_provider_refresh(id, &fetched_for(&[2020, 2021, 2022, 2023, 2024]))
+        .apply_provider_refresh(id, &fetched_in(&[2020, 2021, 2022, 2023, 2024], currency))
         .unwrap();
     for (field, v) in [
         ("est_high_eps", 8),
@@ -11047,5 +11072,99 @@ mod price_origin {
             .unwrap();
         state.mark_provider_stale(id).unwrap();
         assert_eq!(origin(&state, id).unwrap().freshness, Freshness::Current);
+    }
+}
+
+// ── FR5 / FR10 (project review 2026-10-01) — figures in another currency are never applied ──
+mod currency_check {
+    use super::*;
+
+    const YEARS: [i32; 5] = [2020, 2021, 2022, 2023, 2024];
+
+    #[test]
+    fn a_listing_in_another_currency_is_refused_by_name_and_nothing_is_applied() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0xC1, "2026-10-01T09:00:00Z");
+        let id = state.create_study("NVDA.US", "CHF").unwrap();
+        let before = state.get_study(id).unwrap();
+        let depth = state.undo_depth();
+        let fetched = FetchedFinancials {
+            native_currency: "USD".to_string(),
+            ..fetched_with_price(&YEARS, 180)
+        };
+        let refused = state.apply_provider_refresh(id, &fetched).unwrap_err();
+        assert_eq!(
+            refused,
+            "Le fournisseur donne NVDA.US en USD, l'étude est en CHF ; une étude se tient dans la \
+             devise de ses chiffres, rien n'a été appliqué."
+        );
+        assert_eq!(state.get_study(id).unwrap(), before, "nothing applied");
+        assert_eq!(state.undo_depth(), depth, "no undo step");
+        // The same currency in another case is the same currency.
+        state
+            .apply_provider_refresh(id, &fetched_in(&YEARS, "chf"))
+            .unwrap();
+    }
+
+    #[test]
+    fn a_listing_in_hundredths_is_refused_by_its_own_name() {
+        let fetched = fetched_in(&YEARS, "GBX");
+        let refused = crate::state::currency_refusal("ULVR.LSE", "GBP", &fetched, true).unwrap();
+        assert!(refused.contains("centièmes de devise (GBX)"), "{refused}");
+        // `GBp` (pence) is not `GBP` (pounds) — the case carries the meaning here.
+        let pence = fetched_in(&YEARS, "GBp");
+        assert!(crate::state::currency_refusal("ULVR.LSE", "GBP", &pence, true).is_some());
+    }
+
+    #[test]
+    fn the_examination_names_the_currency_picked_and_a_silent_provider_is_no_mismatch() {
+        let usd = fetched_in(&YEARS, "USD");
+        assert_eq!(
+            crate::state::currency_refusal("NVDA.US", "eur", &usd, false).unwrap(),
+            "Le fournisseur donne NVDA.US en USD, la devise choisie est EUR ; rien n'est montré \
+             dans une autre devise que la sienne."
+        );
+        assert_eq!(
+            crate::state::currency_refusal("NVDA.US", "usd", &usd, false),
+            None
+        );
+        assert_eq!(
+            crate::state::currency_refusal("NVDA.US", "USD", &fetched_in(&YEARS, ""), false),
+            None,
+            "a provider that states no currency is not a mismatch"
+        );
+    }
+
+    // G3 review: statements in another currency than the listing are a WARNING (method spec §3:
+    // plausibility warnings never block), for the years applied only.
+    #[test]
+    fn statements_in_another_currency_are_applied_with_a_named_warning() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0xC2, "2026-10-01T09:00:00Z");
+        let id = state.create_study("NOVN.SW", "CHF").unwrap();
+        let fetched = FetchedFinancials {
+            reported_currencies: vec![(2024, "USD".to_string())],
+            ..fetched_in(&YEARS, "CHF")
+        };
+        state.apply_provider_refresh(id, &fetched).unwrap();
+        assert!(!state.get_study(id).unwrap().years.is_empty(), "applied");
+        let applied: Vec<i32> = crate::state::analysis_years(&fetched)
+            .iter()
+            .map(|y| y.year)
+            .collect();
+        assert_eq!(
+            crate::state::currency_warning("NOVN.SW", &fetched, &applied).unwrap(),
+            "Les comptes de NOVN.SW sont publiés en USD, sa cotation est en CHF : le PER, les \
+             zones et les ratios mêlent deux devises sans conversion."
+        );
+        // A year outside those applied (older than the window) raises nothing.
+        let old = FetchedFinancials {
+            reported_currencies: vec![(1999, "DEM".to_string())],
+            ..fetched_in(&YEARS, "CHF")
+        };
+        assert_eq!(
+            crate::state::currency_warning("NOVN.SW", &old, &applied),
+            None
+        );
     }
 }
