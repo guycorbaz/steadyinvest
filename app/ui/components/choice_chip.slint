@@ -62,7 +62,7 @@ export component ChoiceChip inherits Rectangle {
         pressed: touch.pressed || root.flash;
         sunk: root.selected;
         focused: fs.has-focus;
-        edge: root.selected ? Tokens.text-mid : Tokens.separator;
+        edge: root.selected ? Tokens.text-mid : Tokens.relief-edge;
 
         HorizontalLayout {
             padding-left: Tokens.space-12;

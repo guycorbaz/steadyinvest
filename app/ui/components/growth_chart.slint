@@ -57,7 +57,7 @@ export component ContextChip inherits Rectangle {
         height: 100%;
         pressed: chip-touch.pressed;
         sunk: root.selected;
-        edge: root.selected ? Tokens.series-eps : Tokens.separator;
+        edge: root.selected ? Tokens.series-eps : Tokens.relief-edge;
         sunk-fill: Tokens.series-eps.with-alpha(0.15);
         HorizontalLayout {
             padding-left: Tokens.space-12;
