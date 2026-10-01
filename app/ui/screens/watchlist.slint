@@ -33,7 +33,7 @@ global Cols {
 // is acknowledged in the modal dialog. Neutral, no advice. Intents → Rust.
 
 import { Tokens } from "../tokens.slint";
-import { Dialog, ScreeningRow, Watchlist, WatchRow } from "../state.slint";
+import { Dialog, Labels, ScreeningRow, Watchlist, WatchRow } from "../state.slint";
 import { ActionButton } from "../components/action_button.slint";
 import { PanelCard } from "../components/panel_card.slint";
 import { StatusBand } from "../components/status_band.slint";
@@ -98,7 +98,7 @@ export component WatchlistScreen inherits Rectangle {
                 // hue (the saturated zones stay geofenced to the open study's §4 zone bar).
                 if Watchlist.in-buy-zone-count > 0: StatusBand {
                     icon: "◆";
-                    text: @tr("{} valeur(s) dans leur zone d'achat.", Watchlist.in-buy-zone-count);
+                    text: @tr("{} valeur(s) dans leur {}.", Watchlist.in-buy-zone-count, Labels.zone-buy.to-lowercase());
                 }
 
                 // ── G1 final review (M5): a failed read is « indisponible », never the empty state ──

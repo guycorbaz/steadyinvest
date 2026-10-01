@@ -128,9 +128,11 @@ component StudyListRow inherits Rectangle {
             width: 200px;
             background: transparent;
             Text {
-                text: root.entry.zone == "buy" ? @tr("Zone d'achat")
-                    : root.entry.zone == "sell" ? @tr("Zone de vente")
-                    : root.entry.zone == "neutral" ? @tr("Zone de maintien")
+                // FR63 (Guy's on-screen test, 2026-10-01): the zone nouns of the ACTIVE label set
+                // (NAIC « Zone d'achat » / neutral « Zone basse »), never hard-coded.
+                text: root.entry.zone == "buy" ? Labels.zone-buy
+                    : root.entry.zone == "sell" ? Labels.zone-sell
+                    : root.entry.zone == "neutral" ? Labels.zone-hold
                     : root.entry.zone == "below" ? @tr("Sous la bande")
                     : root.entry.zone == "above" ? @tr("Au-dessus de la bande")
                     : "";

@@ -794,8 +794,11 @@ mod tests {
         // 1147 + 25 = 1172, measured.
         // Year validation (Guy's on-screen test, 2026-09-30): the row's label « Valider une année
         // (cellules renseignées) » (the chips reuse the year headers): 1172 + 1 = 1173, measured.
+        // FR63 (Guy's on-screen test, 2026-10-01): the dashboard's three zone nouns and the
+        // glossary term now read the active label set (`Labels.zone-*`), not literals: 1173 − 4 =
+        // 1169, measured.
         assert!(
-            total >= 1173,
+            total >= 1169,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -845,6 +848,42 @@ mod tests {
             3,
             "draft target-gone reason inventory changed — register the new reason"
         );
+    }
+
+    /// FR63 (Guy's on-screen test + review, 2026-10-01): a zone noun is never hard-coded — it comes
+    /// from the active label set (`Labels.zone-*`), so the NAIC and neutral vocabularies are never
+    /// mixed. Scans every `@tr` literal and every Rust `MSG_*` for the six zone nouns of the label
+    /// table (case-insensitive). Exempt: `comparison.slint`, neutral by owner decision 2026-09-26
+    /// (« the report never carries the label-set words »), like the PDFs (report crate, unscanned).
+    #[test]
+    fn zone_nouns_come_from_the_label_set_never_hard_coded() {
+        let nouns: Vec<String> = crate::labels::LABELS
+            .iter()
+            .filter(|e| e.key.starts_with("zone-"))
+            .flat_map(|e| [e.naic, e.neutral])
+            .map(str::to_lowercase)
+            .collect();
+        assert_eq!(nouns.len(), 6, "three zones, two label sets");
+        let mut hits = Vec::new();
+        for path in slint_files() {
+            if path.ends_with("comparison.slint") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).unwrap();
+            for literal in tr_literals(&source) {
+                let lower = literal.to_lowercase();
+                if nouns.iter().any(|n| lower.contains(n.as_str())) {
+                    hits.push(format!("{}: « {literal} »", path.display()));
+                }
+            }
+        }
+        for message in crate::state::USER_FACING_MESSAGES {
+            let lower = message.to_lowercase();
+            if nouns.iter().any(|n| lower.contains(n.as_str())) {
+                hits.push(format!("MSG: « {message} »"));
+            }
+        }
+        assert!(hits.is_empty(), "hard-coded zone nouns: {hits:#?}");
     }
 
     #[test]
