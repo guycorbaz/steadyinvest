@@ -231,6 +231,9 @@ pub const MSG_YEAR_VALIDATED_SOME_LEFT: &str = "{n} cellule(s) de {y} validée(s
 /// Nothing to validate in the year (every filled cell already ✓, or none filled) — named, never a
 /// silent no-op.
 pub const MSG_YEAR_NOTHING_TO_VALIDATE: &str = "Aucune cellule à valider en {y}.";
+/// Nothing validated, only cells with a pending provider divergence left (G3 catch-up review —
+/// never « 0 cellule(s) … validée(s) »).
+pub const MSG_YEAR_ONLY_LEFT: &str = "Aucune cellule validée en {y} : {m} laissée(s) de côté, une valeur du fournisseur diffère, à trancher cellule par cellule.";
 /// The engine could not normalize the study's data (a structural input error — duplicate year /
 /// invalid split): the verdict is suspended, never computed from broken inputs (Story 2.6).
 pub const MSG_NORMALIZE_FAILED: &str =
@@ -916,6 +919,7 @@ pub fn unlock_done_message(count: usize) -> String {
 pub fn year_validated_message(year: i32, validated: usize, left: usize) -> String {
     let template = match (validated, left) {
         (0, 0) => MSG_YEAR_NOTHING_TO_VALIDATE,
+        (0, _) => MSG_YEAR_ONLY_LEFT,
         (_, 0) => MSG_YEAR_VALIDATED,
         _ => MSG_YEAR_VALIDATED_SOME_LEFT,
     };
@@ -1374,6 +1378,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_YEAR_VALIDATED,
     MSG_YEAR_VALIDATED_SOME_LEFT,
     MSG_YEAR_NOTHING_TO_VALIDATE,
+    MSG_YEAR_ONLY_LEFT,
     MSG_NORMALIZE_FAILED,
     MSG_ARCHIVE_CONFIRM,
     MSG_UNARCHIVE_CONFIRM,

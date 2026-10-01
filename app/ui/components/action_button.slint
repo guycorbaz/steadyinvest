@@ -30,7 +30,10 @@ export component ActionButton inherits Rectangle {
     }
 
     accessible-role: button;
-    accessible-label: root.label;
+    // G3 catch-up review: a spoken name when the visible label is ambiguous (« 2020 » validates on
+    // one row, removes validations on the next) — the label by default.
+    in property <string> spoken-label: root.label;
+    accessible-label: root.spoken-label;
     accessible-enabled: root.enabled;
     accessible-action-default => {
         root.activate();
