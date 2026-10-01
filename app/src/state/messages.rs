@@ -1115,6 +1115,13 @@ pub fn provider_failure_notice_with_hint(
 /// cents, Tel Aviv agorot) — exact codes, case carries the meaning (`GBp` ≠ `GBP`).
 const SUBUNIT_CODES: [&str; 4] = ["GBX", "GBp", "ZAc", "ILA"];
 
+/// PURE: the provider lists the symbol in a currency's hundredths (GBX…) — its price and its
+/// per-share figures are not in the same unit, so no ratio built from them is shown (a study
+/// refresh and an examination refuse it by name; a criblage row reads « indisponible »).
+pub fn is_subunit_listing(fetched: &steadyinvest_ingestion::FetchedFinancials) -> bool {
+    SUBUNIT_CODES.contains(&fetched.native_currency.trim())
+}
+
 /// FR5 / FR10 (project review 2026-10-01): the refusal of a fetch quoted in another currency than
 /// `expected` (the study's, or the one picked for an examination — `for_study` picks the wording):
 /// `None` when the listing currency is `expected` (case-insensitive for ordinary codes), or when
@@ -1126,7 +1133,7 @@ pub fn currency_refusal(
     for_study: bool,
 ) -> Option<String> {
     let raw = fetched.native_currency.trim();
-    if SUBUNIT_CODES.contains(&raw) {
+    if is_subunit_listing(fetched) {
         return Some(
             MSG_CURRENCY_SUBUNIT
                 .replace("{ticker}", ticker)

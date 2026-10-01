@@ -143,6 +143,12 @@ pub(crate) fn on_fetched(
             result: Ok(fetched),
             ..
         }) if !has_analysis_years(&fetched) => RowState::Unavailable,
+        // FR5 (2026-10-01): a listing in a currency's hundredths (GBX…) would give a P/E a hundred
+        // times off — the row is unavailable, as an examination of it is refused.
+        Some(RowOutcome {
+            result: Ok(fetched),
+            ..
+        }) if state::is_subunit_listing(&fetched) => RowState::Unavailable,
         Some(RowOutcome {
             result: Ok(fetched),
             effective,

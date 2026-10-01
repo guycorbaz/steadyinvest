@@ -11204,6 +11204,23 @@ mod currency_check {
     }
 
     #[test]
+    fn a_hundredths_listing_is_recognised_whatever_the_currency_expected() {
+        // The criblage has no currency to compare with: it reads this predicate alone.
+        for code in ["GBX", "GBp", "ZAc", "ILA", " GBX "] {
+            assert!(
+                crate::state::is_subunit_listing(&fetched_in(&YEARS, code)),
+                "{code}"
+            );
+        }
+        for code in ["GBP", "gbx", "USD", ""] {
+            assert!(
+                !crate::state::is_subunit_listing(&fetched_in(&YEARS, code)),
+                "{code}"
+            );
+        }
+    }
+
+    #[test]
     fn the_examination_names_the_currency_picked_and_a_silent_provider_is_no_mismatch() {
         let usd = fetched_in(&YEARS, "USD");
         assert_eq!(
