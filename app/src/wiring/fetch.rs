@@ -327,7 +327,13 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                         // provider data stale (never apply an empty refresh as if nothing changed).
                         Ok(fetched) if fetched.canonical.years.is_empty() => {
                             tracing::warn!(study_id = %outcome.study_id, "study fetch returned no usable years (no data)");
-                            say(true, state::MSG_PROVIDER_NO_DATA);
+                            // Guy's on-screen test (2026-10-01): with the symbol's hint (SAP.DE).
+                            let ticker = journal_state
+                                .borrow()
+                                .get_study(outcome.study_id)
+                                .map(|s| s.security_ticker)
+                                .unwrap_or_default();
+                            say(true, &state::no_data_notice(&ticker));
                             let _ = journal_state
                                 .borrow_mut()
                                 .mark_provider_stale(outcome.study_id);
@@ -374,7 +380,8 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                             // Issue #101: if a configured fallback was skipped for a missing key, the
                             // failover the user set up never ran — name it so the outright failure is
                             // not a mystery ("I configured a backup, why did it just fail?").
-                            let mut notice = state::provider_failure_notice_with_hint(&error);
+                            let mut notice =
+                                state::provider_failure_notice_with_hint(&error, &ticker);
                             if let Some(fallback) = configured_fallback_missing_key(
                                 &config.borrow(),
                                 steadyinvest_ingestion::FieldKind::Fundamentals,
@@ -528,12 +535,24 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                         // price the user asked to refresh did not come back.
                         Ok(None) => {
                             tracing::warn!(ticker = %outcome.ticker, "price refresh: provider returned no quote");
-                            holdings.set_notice(state::MSG_PROVIDER_NO_DATA.into());
+                            holdings.set_notice(
+                                state::with_suggestion(
+                                    state::MSG_PROVIDER_NO_DATA,
+                                    &outcome.ticker,
+                                )
+                                .into(),
+                            );
                             mark_holding_stale(&holding_freshness, &key);
                         }
                         Err(error) => {
                             tracing::warn!(ticker = %outcome.ticker, error = %error, "price refresh failed");
-                            holdings.set_notice(state::provider_failure_notice(&error).into());
+                            holdings.set_notice(
+                                state::with_suggestion(
+                                    state::provider_failure_notice(&error),
+                                    &outcome.ticker,
+                                )
+                                .into(),
+                            );
                             mark_holding_stale(&holding_freshness, &key);
                         }
                     }
