@@ -10895,6 +10895,27 @@ mod validate_year {
         assert!(state.validate_year(id, 99).is_err());
     }
 
+    // G3 catch-up review: a study never filled shows the window's chips — nothing to validate,
+    // never « L'enregistrement a échoué. »; only divergences left reads as such.
+    #[test]
+    fn a_never_filled_study_has_nothing_to_validate_and_only_left_is_named() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x7B, NOW);
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let (year, validated, left) = state.validate_year(id, 0).unwrap();
+        assert_eq!((validated, left), (0, 0));
+        assert!(year > 2000, "a year of the window: {year}");
+        assert!(
+            state.get_study(id).unwrap().years.is_empty(),
+            "nothing written"
+        );
+        assert_eq!(
+            state_year_validated_message(2020, 0, 2),
+            "Aucune cellule validée en 2020 : 2 laissée(s) de côté, une valeur du fournisseur \
+             diffère, à trancher cellule par cellule."
+        );
+    }
+
     fn state_year_validated_message(year: i32, validated: usize, left: usize) -> String {
         crate::state::year_validated_message(year, validated, left)
     }

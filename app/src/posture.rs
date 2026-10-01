@@ -1018,7 +1018,9 @@ mod tests {
             // (MSG_CURRENCY_STUDY_MISMATCH, MSG_CURRENCY_MIXED): 256 + 2 = 258; its G3 review — the
             // examination's wording and a listing in hundredths (MSG_CURRENCY_CHOSEN_MISMATCH,
             // MSG_CURRENCY_SUBUNIT): 258 + 2 = 260, measured.
-            260,
+            // G3 catch-up of #267–#270: a year with only divergences left (MSG_YEAR_ONLY_LEFT):
+            // 260 + 1 = 261, measured.
+            261,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured. The G1 final review of the study PDF export

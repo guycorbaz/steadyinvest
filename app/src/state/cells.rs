@@ -280,6 +280,17 @@ impl JournalState {
             .get_study(study_id)
             .ok_or_else(|| MSG_STUDY_GONE.to_string())?;
         let before = study.clone(); // pre-mutation snapshot for undo (Story 2.9)
+        // G3 catch-up review: a study never filled shows the materialized window (the chips) while
+        // `years` is still empty — its years are empty, so nothing to validate, said as such (never
+        // « L'enregistrement a échoué. » for a write not even tried).
+        if study.years.is_empty() {
+            let window =
+                entry::materialize_year_window(&study.created_at, &self.manual_provenance());
+            return match window.get(year_index) {
+                Some(year) => Ok((year.year, 0, 0)),
+                None => Err(MSG_SAVE_FAILED.to_string()),
+            };
+        }
         let Some(year) = study.years.get_mut(year_index) else {
             return Err(MSG_SAVE_FAILED.to_string());
         };

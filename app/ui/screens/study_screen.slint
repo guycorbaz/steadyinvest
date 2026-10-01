@@ -919,7 +919,10 @@ export component StudyScreen inherits Rectangle {
                         alignment: start;
                         for yh[i] in Studies.year-headers: ActionButton {
                             label: yh;
-                            enabled: !Studies.demo-active; // the demo is read-only
+                            spoken-label: @tr("Valider {}", yh);
+                            // G3 catch-up review: read-only and demo dossiers, and while an unlock
+                            // confirmation is pending (its count must not go stale under it).
+                            enabled: !Studies.demo-active && !Studies.read-only && !Studies.confirm-visible;
                             clicked => { Studies.validate-year(i); }
                         }
                     }
@@ -940,6 +943,7 @@ export component StudyScreen inherits Rectangle {
                         }
                         for yh[i] in Studies.year-headers: ActionButton {
                             label: yh;
+                            spoken-label: @tr("Retirer les validations de {}", yh);
                             enabled: !Studies.demo-active;
                             clicked => { Studies.request-unlock("year", "\{i}"); }
                         }

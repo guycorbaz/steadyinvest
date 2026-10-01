@@ -374,8 +374,8 @@ dossier), chaque appel d'outil, chaque proposition enregistrée et chaque refus 
 - **Autres clients IA** : tout client MCP qui lance un serveur par **stdio** convient. Il lui faut
   la commande (le chemin du binaire) et ses arguments (`--dossier <chemin>`). Enregistrez-le de
   façon à ce qu'il ne soit **pas** actif dans le dépôt SteadyInvest.
-- **Protocole** : le serveur parle les versions MCP 2024-11-05 à 2025-11-25, et répond aux clients
-  plus récents (2026-07-28) avec les indications de cache qu'ils exigent.
+- **Protocole** : le serveur négocie les versions MCP 2024-11-05 à 2026-07-28 ; sa liste d'outils
+  porte les indications de cache que la version 2026-07-28 exige.
 
 ---
 
