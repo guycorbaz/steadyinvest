@@ -98,6 +98,7 @@ export component JudgmentField inherits VerticalLayout {
                 visible: input.text == "";
             }
             input := TextInput {
+                read-only: Studies.demo-active; // the read-only demo (G3 review 2026-10-01)
                 color: Tokens.text-high;
                 selection-background-color: Tokens.focus;
                 font-family: Tokens.font-numeric;
