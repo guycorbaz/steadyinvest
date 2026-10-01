@@ -972,7 +972,7 @@ fn trace_yearly(study: &Study) -> String {
 /// The method's quality flags of a study, as one line (FR7, Guy's on-screen test 2026-10-01: the
 /// AI saw « PER haut jugé au-dessus de 25 », the study screen did not): the flags as the
 /// comparison and the review list them (`state::shown_quality_flags`, one high-P/E flag), « aucun »
-/// when every rule was checked and none fired, `""` when not assessable (an unknown is never
+/// when every rule was checked and none fired, « — » when not assessable (an unknown is never
 /// stated as « aucun »).
 pub fn quality_flags_line(
     outputs: &SsgOutputs,
@@ -984,10 +984,11 @@ pub fn quality_flags_line(
             outputs,
             &steadyinvest_report::form::to_judgment_inputs(judgment),
         );
+        // G3 review: « — » when not assessable, as the comparison shows it — said, never hidden.
         return if assessable {
             FLAGS_NONE.to_string()
         } else {
-            String::new()
+            EMPTY_SLOT.to_string()
         };
     }
     flags
@@ -2329,6 +2330,6 @@ mod tests {
         let study = study_with(years, unknown);
         let snap = build_snapshot(&study).unwrap();
         let line = quality_flags_line(snap.outputs(), &study.judgment);
-        assert_ne!(line, FLAGS_NONE);
+        assert_eq!(line, "—", "not assessable: the em-dash, never « aucun »");
     }
 }

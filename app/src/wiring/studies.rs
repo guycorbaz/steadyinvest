@@ -629,12 +629,12 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             let numbers = journal_state.borrow().number_format().report_style();
             // FR7 (2026-10-01): the method's quality flags in the PDF, as on the screen.
             let flags = crate::viewmodel::engine::build_snapshot(&study)
+                .ok()
                 .map(|snap| {
                     crate::viewmodel::engine::quality_flags_line(snap.outputs(), &study.judgment)
-                })
-                .unwrap_or_default();
+                });
             let extras = steadyinvest_report::StudyPdfExtras {
-                quality_flags: Some(flags.as_str()),
+                quality_flags: flags.as_deref(),
             };
             let bytes = match steadyinvest_report::render_study_pdf_with(&study, numbers, &extras) {
                 Ok(bytes) => bytes,
