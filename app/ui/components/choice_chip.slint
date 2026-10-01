@@ -3,6 +3,7 @@
 // step + weight step. Keyboard: Tab-reachable, Enter/Space activates, visible focus ring.
 
 import { Tokens } from "../tokens.slint";
+import { ButtonFace } from "button_face.slint";
 
 export component ChoiceChip inherits Rectangle {
     in property <string> label;
@@ -18,14 +19,28 @@ export component ChoiceChip inherits Rectangle {
     accessible-action-default => { root.activated(); }
 
     height: Tokens.row-height + Tokens.space-4;
-    border-radius: Tokens.radius;
-    background: root.selected ? Tokens.surface-alt : transparent;
-    border-width: fs.has-focus ? Tokens.focus-border : Tokens.border;
-    border-color: fs.has-focus ? Tokens.focus : (root.selected ? Tokens.text-mid : Tokens.separator);
+    // The face wraps the label, so the chip states its own width (never narrower than its label).
+    min-width: chip-label.preferred-width + 2 * Tokens.space-12;
+    preferred-width: self.min-width;
+    horizontal-stretch: 0;
+    background: transparent;
+    // Guy, 2026-10-01: the chosen option stays pushed in (sunk), the others stand in relief; a
+    // keyboard choice shows the same brief press as a click.
+    property <bool> flash: false;
+    flash-timer := Timer {
+        interval: 120ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            root.flash = false;
+        }
+    }
 
     fs := FocusScope {
         key-pressed(event) => {
             if (event.text == Key.Return || event.text == " ") {
+                root.flash = true;
+                flash-timer.running = true;
                 root.activated();
                 return accept;
             }
@@ -41,16 +56,25 @@ export component ChoiceChip inherits Rectangle {
         }
     }
 
-    HorizontalLayout {
-        padding-left: Tokens.space-12;
-        padding-right: Tokens.space-12;
+    ButtonFace {
+        width: 100%;
+        height: 100%;
+        pressed: touch.pressed || root.flash;
+        sunk: root.selected;
+        focused: fs.has-focus;
+        edge: root.selected ? Tokens.text-mid : Tokens.relief-edge;
 
-        Text {
-            text: root.label;
-            color: root.selected ? Tokens.text-high : Tokens.text-mid;
-            font-size: Tokens.font-body;
-            font-weight: root.selected ? Tokens.weight-semibold : Tokens.weight-regular;
-            vertical-alignment: center;
+        HorizontalLayout {
+            padding-left: Tokens.space-12;
+            padding-right: Tokens.space-12;
+
+            chip-label := Text {
+                text: root.label;
+                color: root.selected ? Tokens.text-high : Tokens.text-mid;
+                font-size: Tokens.font-body;
+                font-weight: root.selected ? Tokens.weight-semibold : Tokens.weight-regular;
+                vertical-alignment: center;
+            }
         }
     }
 }

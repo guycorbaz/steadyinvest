@@ -1,0 +1,63 @@
+// The face of every button and chip (Guy's on-screen test, 2026-10-01: buttons were hard to see
+// and a press left no doubt-free trace; then « passe au relief net »). A clear relief — a light top
+// edge, a lighter rim and a 3 px dark base — that SINKS by 3 px when pressed (mouse or keyboard) or while a toggle is selected:
+// the shadow goes, the fill darkens. Disabled = flat. The outer box keeps its height, so a press
+// never moves the layout; only the face moves inside it. No hue is spent (NFR-U1): ink and the
+// theme's own surfaces only.
+
+import { Tokens } from "../tokens.slint";
+
+export component ButtonFace inherits Rectangle {
+    // Pressed now (a click held, or a keyboard activation's brief flash).
+    in property <bool> pressed;
+    // A selected toggle stays sunk (the chosen option reads as « pushed in »).
+    in property <bool> sunk;
+    in property <bool> enabled: true;
+    in property <bool> focused;
+    // The face's fill at rest; pressed / sunk darken to `Tokens.surface`.
+    in property <color> fill: Tokens.surface-alt;
+    in property <color> sunk-fill: Tokens.relief-pressed;
+    in property <color> edge: Tokens.relief-edge;
+
+    property <bool> down: root.enabled && (root.pressed || root.sunk);
+    property <bool> raised: root.enabled && !root.down;
+
+    background: transparent;
+
+    // The base: the face's dark underside, showing 1 px below a raised face (a drop shadow is
+    // invisible on the dark theme). Hidden when the face sinks onto it.
+    if root.raised: Rectangle {
+        x: 0;
+        y: Tokens.relief;
+        width: parent.width;
+        height: parent.height - Tokens.relief;
+        border-radius: Tokens.radius;
+        background: Tokens.relief-shadow;
+    }
+
+    face := Rectangle {
+        x: 0;
+        y: root.down ? Tokens.relief : 0;
+        width: parent.width;
+        height: parent.height - Tokens.relief;
+        border-radius: Tokens.radius;
+        // Raised: a slight top-to-bottom shading so the face reads as standing out; sunk: flat dark.
+        background: root.down ? root.sunk-fill
+            : root.raised ? @linear-gradient(180deg, root.fill.brighter(0.4) 0%, root.fill 100%)
+            : root.fill;
+        border-width: root.focused ? Tokens.focus-border : Tokens.border;
+        border-color: root.focused ? Tokens.focus : root.edge;
+        animate y { duration: 60ms; }
+
+        // The top light: a 1 px line just inside the border, only while raised.
+        if root.raised: Rectangle {
+            x: Tokens.radius;
+            y: Tokens.border;
+            width: parent.width - 2 * Tokens.radius;
+            height: 1px;
+            background: Tokens.relief-light;
+        }
+
+        @children
+    }
+}

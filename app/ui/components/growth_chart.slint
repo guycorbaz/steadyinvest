@@ -13,6 +13,7 @@
 // Price, text-low Sales) + stroke weight, never colour. NEVER auto-placed (FR33): the line + handle
 // render only once the engine has a forecast (`judgment-y >= 0`); unset shows a neutral drag hint.
 
+import { ButtonFace } from "button_face.slint";
 import { Tokens } from "../tokens.slint";
 import { Studies, GrowthChartState, AxisTick } from "../state.slint";
 import { AiChartLine, AiChartCaption, AiChipRow } from "ai_judgment.slint";
@@ -46,21 +47,30 @@ export component ContextChip inherits Rectangle {
     in property <bool> selected;
     callback clicked;
     height: Tokens.row-height;
-    border-radius: Tokens.radius;
-    border-width: Tokens.border;
-    border-color: root.selected ? Tokens.series-eps : Tokens.separator;
-    background: root.selected ? Tokens.series-eps.with-alpha(0.15) : Tokens.surface-alt;
-    HorizontalLayout {
-        padding-left: Tokens.space-12;
-        padding-right: Tokens.space-12;
-        Text {
-            text: root.label;
-            color: root.selected ? Tokens.text-high : Tokens.text-mid;
-            font-size: Tokens.font-caption;
-            vertical-alignment: center;
+    min-width: ctx-label.preferred-width + 2 * Tokens.space-12;
+    preferred-width: self.min-width;
+    horizontal-stretch: 0;
+    background: transparent;
+    // Guy, 2026-10-01: the same relief as every button; the selected line stays pushed in.
+    ButtonFace {
+        width: 100%;
+        height: 100%;
+        pressed: chip-touch.pressed;
+        sunk: root.selected;
+        edge: root.selected ? Tokens.series-eps : Tokens.relief-edge;
+        sunk-fill: Tokens.series-eps.with-alpha(0.15);
+        HorizontalLayout {
+            padding-left: Tokens.space-12;
+            padding-right: Tokens.space-12;
+            ctx-label := Text {
+                text: root.label;
+                color: root.selected ? Tokens.text-high : Tokens.text-mid;
+                font-size: Tokens.font-caption;
+                vertical-alignment: center;
+            }
         }
     }
-    TouchArea {
+    chip-touch := TouchArea {
         mouse-cursor: MouseCursor.pointer;
         clicked => { root.clicked(); }
     }

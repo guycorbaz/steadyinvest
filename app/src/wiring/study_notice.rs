@@ -113,8 +113,12 @@ fn clears(shown: Shown, source: Source, outcome_only: bool) -> bool {
 
 fn write(ui: &MainWindow, shown: Shown, text: &str) {
     SHOWN.with(|s| s.set(shown));
-    ui.global::<Studies>()
-        .set_study_notice(SharedString::from(text));
+    let studies = ui.global::<Studies>();
+    studies.set_study_notice(SharedString::from(text));
+    // Guy, 2026-10-01: the slot lights up on every notice, the same text again included.
+    if !text.is_empty() {
+        studies.set_study_notice_seq(studies.get_study_notice_seq().wrapping_add(1));
+    }
 }
 
 /// A failure answering the gesture just made — always shown.

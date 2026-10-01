@@ -3,6 +3,7 @@
 // action is `clicked`.
 
 import { Tokens } from "../tokens.slint";
+import { ButtonFace } from "button_face.slint";
 
 export component ActionButton inherits Rectangle {
     in property <string> label;
@@ -40,6 +41,13 @@ export component ActionButton inherits Rectangle {
             root.clicked();
         }
     }
+    function key-activate() {
+        if (root.enabled) {
+            root.flash = true;
+            flash-timer.running = true;
+            root.clicked();
+        }
+    }
 
     height: root.compact ? 32px : Tokens.row-height + Tokens.space-4;
     forward-focus: fs;
@@ -48,11 +56,20 @@ export component ActionButton inherits Rectangle {
     // « Transactions » to « Transactior »): the label plus its padding, with the old floor.
     min-width: root.compact ? label-text.preferred-width + 2 * Tokens.space-12
         : max(Tokens.space-48 * 2, label-text.preferred-width + 2 * Tokens.space-16);
-    border-radius: Tokens.radius;
     opacity: root.enabled ? 1.0 : 0.5;
-    background: touch.pressed ? Tokens.surface : Tokens.surface-alt;
-    border-width: fs.has-focus ? Tokens.focus-border : Tokens.border;
-    border-color: fs.has-focus ? Tokens.focus : Tokens.separator;
+    background: transparent;
+    // A keyboard activation shows the same brief press as a click (Guy, 2026-10-01: a press must
+    // be seen, whatever the hand).
+    property <bool> flash: false;
+
+    flash-timer := Timer {
+        interval: 120ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            root.flash = false;
+        }
+    }
 
     Timer {
         interval: 30ms;
@@ -80,7 +97,7 @@ export component ActionButton inherits Rectangle {
             if (event.text == Key.Return || event.text == " ") {
                 // A held key's auto-repeat, or a reflex press right after the focus arrived.
                 if (event.repeat || !root.armed) { return accept; }
-                root.activate();
+                root.key-activate();
                 return accept;
             }
             reject
@@ -95,17 +112,25 @@ export component ActionButton inherits Rectangle {
         }
     }
 
-    HorizontalLayout {
-        padding-left: root.compact ? Tokens.space-12 : Tokens.space-16;
-        padding-right: root.compact ? Tokens.space-12 : Tokens.space-16;
+    ButtonFace {
+        width: 100%;
+        height: 100%;
+        pressed: touch.pressed || root.flash;
+        enabled: root.enabled;
+        focused: fs.has-focus;
 
-        label-text := Text {
-            text: root.label;
-            color: Tokens.text-high;
-            font-size: root.compact ? Tokens.font-caption : Tokens.font-body;
-            font-weight: Tokens.weight-medium;
-            vertical-alignment: center;
-            horizontal-alignment: center;
+        HorizontalLayout {
+            padding-left: root.compact ? Tokens.space-12 : Tokens.space-16;
+            padding-right: root.compact ? Tokens.space-12 : Tokens.space-16;
+
+            label-text := Text {
+                text: root.label;
+                color: Tokens.text-high;
+                font-size: root.compact ? Tokens.font-caption : Tokens.font-body;
+                font-weight: Tokens.weight-medium;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+            }
         }
     }
 }
