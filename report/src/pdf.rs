@@ -222,6 +222,24 @@ pub(crate) fn judged(figure: &str) -> String {
 /// [`NumberStyle::Point`]), as the app shows it; the comparison / review / quick-screen reports
 /// receive their strings already spelled by the app.
 pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, ReportError> {
+    render_study_pdf_with(study, numbers, &StudyPdfExtras::default())
+}
+
+/// What the app adds to the study PDF that the report crate does not word itself (FR7, Guy's
+/// on-screen test + project review 2026-10-01): the method's quality flags, already stated in the
+/// app's words (« PER haut jugé au-dessus de 25 · … », « aucun », « — » when not assessable), or
+/// `None` when the study did not compute (the line is then left out).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct StudyPdfExtras<'a> {
+    pub quality_flags: Option<&'a str>,
+}
+
+/// [`render_study_pdf`] with the app's [`StudyPdfExtras`]; without them it is byte-identical.
+pub fn render_study_pdf_with(
+    study: &Study,
+    numbers: NumberStyle,
+    extras: &StudyPdfExtras<'_>,
+) -> Result<Vec<u8>, ReportError> {
     let nf = numbers;
     let frame = crate::form::build_frame(study).map_err(ReportError::Normalize)?;
     let outputs = frame.snapshot.outputs();
@@ -605,9 +623,15 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
         "Position : {}",
         verdict_label(frame.snapshot.verdict())
     ));
+    // FR7 (2026-10-01): the method's quality flags, as the study screen states them — right under
+    // the current position, before any frozen verdict (they are today's, never the frozen ones).
+    if let Some(flags) = extras.quality_flags.filter(|f| !f.trim().is_empty()) {
+        doc.line(&format!("{FLAGS_LINE} {flags}"));
+    }
     if outputs.low_confidence {
         doc.line("Confiance réduite : moins d'années exploitables que le seuil de la méthode.");
     }
+
     // Story 8.8 (spec §7): the frozen verdict, and the current one beside it when they differ.
     if let Some(frozen) = &study.frozen_verdict {
         frozen_block(&mut doc, study, &frame, frozen, nf);
@@ -1391,6 +1415,8 @@ fn jj_mm_aaaa(ts: &str) -> String {
     }
 }
 
+/// FR7 (2026-10-01): the label of the quality-flags line of the Synthèse.
+const FLAGS_LINE: &str = "Signaux de qualité :";
 const FROZEN_ON: &str = "Verdict figé le";
 const FROZEN_DIFFERS: &str = "Le verdict actuel diffère du verdict figé le";
 const FROZEN_ROW_VERDICT: &str = "Verdict";
@@ -1623,6 +1649,7 @@ const REPORT_USER_FACING: &[&str] = &[
     "(hors div.)",
     // Synthèse.
     "Position :",
+    FLAGS_LINE,
     "Confiance réduite : moins d'années exploitables que le seuil de la méthode.",
     // Annexe columns.
     ANNEX_SALES,
@@ -4254,6 +4281,28 @@ mod tests {
         study.frozen_verdict = Some(frozen);
         let edited = render_study_pdf(&study, NumberStyle::Comma).unwrap();
         assert!(contains(&edited, "• Entrées : 1 modifiée(s)"));
+    }
+
+    // FR7 (2026-10-01): the app's quality-flags line is printed in the Synthèse; without it the
+    // PDF stays byte-identical (the pins below).
+    #[test]
+    fn the_quality_flags_line_is_printed_when_the_app_gives_it() {
+        let extras = StudyPdfExtras {
+            quality_flags: Some("PER haut jugé au-dessus de 25 · ratio hausse / baisse sous 3"),
+        };
+        let with = render_study_pdf_with(&demo_study(), NumberStyle::Comma, &extras).unwrap();
+        assert!(contains(
+            &with,
+            "Signaux de qualité : PER haut jugé au-dessus de 25 · ratio hausse / baisse sous 3"
+        ));
+        let blank = StudyPdfExtras {
+            quality_flags: Some("  "),
+        };
+        assert_eq!(
+            render_study_pdf_with(&demo_study(), NumberStyle::Comma, &blank).unwrap(),
+            render_study_pdf(&demo_study(), NumberStyle::Comma).unwrap(),
+            "a blank line prints nothing"
+        );
     }
 
     #[test]

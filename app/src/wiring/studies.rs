@@ -627,7 +627,16 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             };
             // G1 I: the PDF's figures in the user's number format, as on the screen.
             let numbers = journal_state.borrow().number_format().report_style();
-            let bytes = match steadyinvest_report::render_study_pdf(&study, numbers) {
+            // FR7 (2026-10-01): the method's quality flags in the PDF, as on the screen.
+            let flags = crate::viewmodel::engine::build_snapshot(&study)
+                .ok()
+                .map(|snap| {
+                    crate::viewmodel::engine::quality_flags_line(snap.outputs(), &study.judgment)
+                });
+            let extras = steadyinvest_report::StudyPdfExtras {
+                quality_flags: flags.as_deref(),
+            };
+            let bytes = match steadyinvest_report::render_study_pdf_with(&study, numbers, &extras) {
                 Ok(bytes) => bytes,
                 Err(error) => {
                     // The study does not compute as entered — a named refusal, no panic, no leak.

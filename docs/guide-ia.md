@@ -209,8 +209,9 @@ Quelques demandes typiques, dans une session `claude` lancée depuis `~/steadyin
 - « Qu'ai-je fait de tes propositions précédentes ? » (le Registre, `get_drafts_record`).
 
 L'IA voit les **signaux de qualité** du moteur (par exemple un PER haut jugé au-dessus de 20,
-« agressif », ou de 25, « invraisemblable »). Dans l'application, ces signaux apparaissent dans
-« Comparer des études » et dans la Revue du portefeuille, pas sur l'écran d'étude.
+« agressif », ou de 25, « invraisemblable »). Dans l'application, ces signaux apparaissent sur
+l'écran d'étude (« Signaux de qualité », sous les chiffres clés) et dans son PDF, dans « Comparer des
+études » et dans la Revue du portefeuille.
 
 Ce que l'IA **ne peut pas proposer** : le **cours actuel** et le **BPA des douze derniers mois**
 (ce sont des faits de marché, qui viennent du fournisseur ou de votre saisie), et une **année** qui

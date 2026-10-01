@@ -17,6 +17,9 @@ pub mod quick_screen;
 pub mod review;
 
 pub use comparison::{Comparison, ComparisonColumn, average_years, render_comparison};
-pub use pdf::{JUDGED_NOTE, JUDGED_SIGIL, NumberStyle, ReportError, render_study_pdf};
+pub use pdf::{
+    JUDGED_NOTE, JUDGED_SIGIL, NumberStyle, ReportError, StudyPdfExtras, render_study_pdf,
+    render_study_pdf_with,
+};
 pub use quick_screen::{QuickScreen, QuickScreenLadder, QuickScreenPriceRow, render_quick_screen};
 pub use review::{DueLine, PortfolioReview, ReviewLine, ShareLine, render_portfolio_review};

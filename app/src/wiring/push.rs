@@ -118,6 +118,7 @@ pub(crate) fn push_form(
             studies.set_pe_computed(engine::pe_computed(outputs, format));
             studies.set_risk_computed(engine::risk_computed(outputs, &study.judgment, format));
             studies.set_return_computed(engine::return_computed(outputs, format));
+            studies.set_quality_flags(engine::quality_flags_line(outputs, &study.judgment).into());
             studies.set_zone_bar(engine::zone_bar(study, snapshot, format));
             studies.set_verdict(engine::verdict_badge(study, snapshot, format));
             // Story 8.8: the frozen verdict against this live one, and what keeps it from freezing.
@@ -180,6 +181,7 @@ pub(crate) fn push_form(
             studies.set_pe_computed(PeComputed::default());
             studies.set_risk_computed(RiskComputed::default());
             studies.set_return_computed(ReturnComputed::default());
+            studies.set_quality_flags(SharedString::new());
             studies.set_judgment_suggestions(JudgmentSuggestions::default());
             studies.set_current_price_out_of_scale(false);
             studies.set_zone_bar(ZoneBarState::default());
@@ -313,6 +315,7 @@ pub(crate) fn push_live_preview(
         // with the est-high-EPS the drag sets, so the §4 surface never disagrees with itself.
         studies.set_risk_computed(engine::risk_computed(outputs, &study.judgment, format));
         studies.set_return_computed(engine::return_computed(outputs, format));
+        studies.set_quality_flags(engine::quality_flags_line(outputs, &study.judgment).into());
         studies.set_section4_warning_key(
             warnings
                 .study_key()

@@ -806,6 +806,9 @@ export global Studies {
     in-out property <PeComputed> pe-computed;
     in-out property <RiskComputed> risk-computed;
     in-out property <ReturnComputed> return-computed;
+    // FR7 (Guy's on-screen test, 2026-10-01): the method's quality flags, one line (« aucun » when
+    // none fired; "" when not assessable — the line is then hidden).
+    in-out property <string> quality-flags;
     // The §4 zone bar + the verdict (badge + sticky bar) + the traceability surface.
     in-out property <ZoneBarState> zone-bar;
     in-out property <VerdictState> verdict;
