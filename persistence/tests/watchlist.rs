@@ -179,6 +179,7 @@ fn deleting_a_linked_study_clears_the_watchlist_link() {
         years: Vec::new(),
         judgment: Judgment {
             ai_placed: Default::default(),
+            current_price_origin: None,
             estimated_high_eps: None,
             estimated_low_eps: None,
             projected_sales_growth_pct: None,

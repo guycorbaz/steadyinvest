@@ -155,6 +155,23 @@ pub fn judgment_to_gate_state(value: Option<Money>) -> GateState {
     }
 }
 
+/// The current price → [`GateState`] (Guy's on-screen test 2026-10-01, FR12 / FR23): `None` →
+/// `Missing`; a price whose provider origin was flagged stale by a failed refresh → `Stale` (the
+/// verdict degrades, as for a stale provider cell); otherwise `ValidatedFresh` — a fetched price
+/// is the owner's own gesture (he asked for the fetch), a typed one his own number.
+pub fn price_to_gate_state(
+    value: Option<Money>,
+    origin: Option<&steadyinvest_contract::PriceOrigin>,
+) -> GateState {
+    match (value, origin) {
+        (None, _) => GateState::Missing,
+        (Some(_), Some(o)) if o.freshness == steadyinvest_contract::Freshness::Stale => {
+            GateState::Stale
+        }
+        (Some(_), _) => GateState::ValidatedFresh,
+    }
+}
+
 /// Build [`InputGates`]: one [`YearGates`] per **usable** year (filter `canonical.years` on
 /// [`YearUsability::Usable`], read the matching study year's four load-bearing cells), plus the five
 /// load-bearing judgment gates — exactly the pinned catalogs, in catalog order.
@@ -183,7 +200,7 @@ pub fn to_input_gates(study: &Study, canonical: &CanonicalFinancials) -> InputGa
         judgment_to_gate_state(j.estimated_low_eps),
         judgment_to_gate_state(j.judged_avg_high_pe),
         judgment_to_gate_state(j.judged_avg_low_pe),
-        judgment_to_gate_state(j.current_price),
+        price_to_gate_state(j.current_price, j.current_price_origin.as_ref()),
     ];
     InputGates::new(year_gates, judgment_gates)
 }
@@ -407,6 +424,7 @@ mod tests {
     fn full_study() -> Study {
         let judgment = Judgment {
             ai_placed: Default::default(),
+            current_price_origin: None,
             estimated_high_eps: Some(money_of("9")),
             estimated_low_eps: Some(money_of("4")),
             projected_sales_growth_pct: None,

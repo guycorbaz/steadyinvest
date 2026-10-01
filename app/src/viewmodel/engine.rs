@@ -789,6 +789,7 @@ pub fn verdict_trace(study: &Study, snapshot: &StudySnapshot, format: NumberForm
             j.estimated_high_eps,
             DisplayField::PerShare,
             format,
+            j.ai_placed.estimated_high_eps.as_ref(),
         )
         .into(),
         trace_input(
@@ -796,6 +797,7 @@ pub fn verdict_trace(study: &Study, snapshot: &StudySnapshot, format: NumberForm
             j.estimated_low_eps,
             DisplayField::PerShare,
             format,
+            j.ai_placed.estimated_low_eps.as_ref(),
         )
         .into(),
         trace_input(
@@ -803,6 +805,7 @@ pub fn verdict_trace(study: &Study, snapshot: &StudySnapshot, format: NumberForm
             j.judged_avg_high_pe,
             DisplayField::PeRatio,
             format,
+            j.ai_placed.judged_avg_high_pe.as_ref(),
         )
         .into(),
         trace_input(
@@ -810,15 +813,11 @@ pub fn verdict_trace(study: &Study, snapshot: &StudySnapshot, format: NumberForm
             j.judged_avg_low_pe,
             DisplayField::PeRatio,
             format,
+            j.ai_placed.judged_avg_low_pe.as_ref(),
         )
         .into(),
-        trace_input(
-            LBL_CURRENT_PRICE,
-            j.current_price,
-            DisplayField::Price,
-            format,
-        )
-        .into(),
+        trace_price(j, format).into(),
+        trace_yearly(study).into(),
     ];
     let open_gates: Vec<slint::SharedString> = verdict
         .open_gates()
@@ -844,13 +843,115 @@ fn trace_input(
     value: Option<Money>,
     field: DisplayField,
     format: NumberFormat,
+    ai: Option<&steadyinvest_contract::AiOrigin>,
 ) -> String {
     let shown = match value {
         Some(m) => format_scaled(m.as_decimal(), field, format),
-        None => EMPTY_SLOT.to_string(),
+        None => return format!("{label} : {EMPTY_SLOT}"),
     };
-    // A typed judgment is the user's own input (provenance: manual) — the recorded gate-state reading.
-    format!("{label} : {shown} ({PROVENANCE_MANUAL})")
+    // A typed judgment is the user's own input (provenance: manual) — the recorded gate-state
+    // reading; one placed by a validated AI proposal says so (Guy's on-screen test, 2026-10-01).
+    match ai {
+        Some(origin) => format!(
+            "{label} : {shown} ({})",
+            TRACE_AI_VALIDATED.replace("{}", &trace_date(&origin.validated_at.0))
+        ),
+        None => format!("{label} : {shown} ({PROVENANCE_MANUAL})"),
+    }
+}
+
+/// « 2026-09-30… » → « 30/09/2026 » (the date part of an RFC 3339 stamp or a session date).
+fn trace_date(stamp: &str) -> String {
+    let d = stamp.get(..10).unwrap_or(stamp);
+    match (d.get(..4), d.get(5..7), d.get(8..10)) {
+        (Some(y), Some(m), Some(day)) => format!("{day}/{m}/{y}"),
+        _ => d.to_string(),
+    }
+}
+
+/// The current price's traceability line (Guy's on-screen test 2026-10-01, FR11): its real
+/// origin — the provider with its session date (or fetch date), the owner's typing, or unknown —
+/// and « périmé » after a failed refresh. Never « manuel » for a fetched price.
+fn trace_price(j: &steadyinvest_contract::Judgment, format: NumberFormat) -> String {
+    use steadyinvest_contract::{Freshness, Source};
+    let shown = match j.current_price {
+        Some(m) => format_scaled(m.as_decimal(), DisplayField::Price, format),
+        None => return format!("{LBL_CURRENT_PRICE} : {EMPTY_SLOT}"),
+    };
+    let origin = match &j.current_price_origin {
+        None => TRACE_ORIGIN_UNKNOWN.to_string(),
+        Some(o) => {
+            let base = match (o.source, &o.session_date) {
+                (Source::Provider, Some(session)) => {
+                    TRACE_PRICE_PROVIDER_SESSION.replace("{}", &trace_date(session))
+                }
+                (Source::Provider, None) => {
+                    TRACE_PRICE_PROVIDER_AT.replace("{}", &trace_date(&o.at.0))
+                }
+                // A price is never derived; read as the owner's own number if it ever were.
+                (Source::Manual | Source::Derived, _) => {
+                    TRACE_PRICE_TYPED.replace("{}", &trace_date(&o.at.0))
+                }
+            };
+            if o.freshness == Freshness::Stale {
+                format!("{base} — {GATE_STALE}")
+            } else {
+                base
+            }
+        }
+    };
+    format!("{LBL_CURRENT_PRICE} : {shown} ({origin})")
+}
+
+/// The yearly data's provenance in one line (FR11): how many filled cells came from the provider
+/// (with the latest fetch date), from the owner's typing, or from a validated AI proposal.
+fn trace_yearly(study: &Study) -> String {
+    use steadyinvest_contract::Source;
+    let (mut provider, mut typed, mut ai) = (0usize, 0usize, 0usize);
+    let mut latest: Option<&str> = None;
+    for y in &study.years {
+        let optional = [
+            y.dividend_per_share.as_ref(),
+            y.pre_tax_profit.as_ref(),
+            y.book_value_per_share.as_ref(),
+        ];
+        let cells = [&y.sales, &y.eps, &y.high_price, &y.low_price]
+            .into_iter()
+            .chain(optional.into_iter().flatten());
+        for c in cells.filter(|c| c.value.is_some()) {
+            if c.provenance.ai_origin.is_some() {
+                ai += 1;
+            } else if c.source == Source::Provider {
+                provider += 1;
+                let at = c.provenance.timestamp.0.as_str();
+                if latest.is_none_or(|l| at > l) {
+                    latest = Some(at);
+                }
+            } else {
+                typed += 1;
+            }
+        }
+    }
+    let mut parts = Vec::new();
+    if provider > 0 {
+        parts.push(
+            TRACE_YEARLY_PROVIDER
+                .replacen("{}", &provider.to_string(), 1)
+                .replacen("{}", &trace_date(latest.unwrap_or_default()), 1),
+        );
+    }
+    if typed > 0 {
+        parts.push(TRACE_YEARLY_TYPED.replace("{}", &typed.to_string()));
+    }
+    if ai > 0 {
+        parts.push(TRACE_YEARLY_AI.replace("{}", &ai.to_string()));
+    }
+    let body = if parts.is_empty() {
+        EMPTY_SLOT.to_string()
+    } else {
+        parts.join(" · ")
+    };
+    format!("{TRACE_YEARLY} : {body}")
 }
 
 /// The current judgment-input values surfaced as locale-formatted strings for the entry fields
@@ -1063,6 +1164,17 @@ pub const TREND_EVEN: &str = "stable";
 pub const TREND_DOWN: &str = "baisse";
 pub const PROVENANCE_MANUAL: &str = "manuel";
 pub const TRACE_TITLE_VERDICT: &str = "Conclusion — entrées, provenance & règle";
+// Guy's on-screen test (2026-10-01, FR11): the real origin of the current price and of the yearly
+// data in the traceability.
+pub const TRACE_PRICE_PROVIDER_SESSION: &str = "fournisseur, séance du {}";
+pub const TRACE_PRICE_PROVIDER_AT: &str = "fournisseur, récupéré le {}";
+pub const TRACE_PRICE_TYPED: &str = "saisi le {}";
+pub const TRACE_ORIGIN_UNKNOWN: &str = "origine non enregistrée";
+pub const TRACE_AI_VALIDATED: &str = "proposé par l'IA, validé le {}";
+pub const TRACE_YEARLY: &str = "Données annuelles";
+pub const TRACE_YEARLY_PROVIDER: &str = "{} du fournisseur (dernière récupération le {})";
+pub const TRACE_YEARLY_TYPED: &str = "{} saisie(s)";
+pub const TRACE_YEARLY_AI: &str = "{} proposée(s) par l'IA et validée(s)";
 pub const TRACE_RULE_PREFIX: &str = "Méthode";
 pub const TRACE_VERDICT_FORMULA: &str = "zones §4 + ratio H/B + appréciation §5";
 /// The FR8 low-confidence reason carried onto the verdict surface (Story 2.7, AC1). Fact-stating,
@@ -1100,6 +1212,15 @@ pub const USER_FACING_LABELS: &[&str] = &[
     TREND_DOWN,
     PROVENANCE_MANUAL,
     TRACE_TITLE_VERDICT,
+    TRACE_PRICE_PROVIDER_SESSION,
+    TRACE_PRICE_PROVIDER_AT,
+    TRACE_PRICE_TYPED,
+    TRACE_ORIGIN_UNKNOWN,
+    TRACE_AI_VALIDATED,
+    TRACE_YEARLY,
+    TRACE_YEARLY_PROVIDER,
+    TRACE_YEARLY_TYPED,
+    TRACE_YEARLY_AI,
     TRACE_RULE_PREFIX,
     TRACE_VERDICT_FORMULA,
     CONFIDENCE_LOW,
@@ -1173,6 +1294,7 @@ mod tests {
     fn full_judgment() -> Judgment {
         Judgment {
             ai_placed: Default::default(),
+            current_price_origin: None,
             estimated_high_eps: Some(money("8")),
             estimated_low_eps: Some(money("3")),
             projected_sales_growth_pct: Some(money("10")),
@@ -1734,8 +1856,8 @@ mod tests {
         assert!(trace.visible);
         assert_eq!(
             trace.inputs.row_count(),
-            5,
-            "the five load-bearing judgment inputs are listed with provenance"
+            6,
+            "the five load-bearing judgment inputs with provenance, then the yearly data's line"
         );
         assert!(
             trace.rule.as_str().contains(snap.method_version()),
@@ -2007,6 +2129,111 @@ mod tests {
         assert!(
             !judgment_fields(&direct_only, NumberFormat::Comma).eps_growth_shadowed_in_growth_line,
             "no growth % set at all → nothing to shadow"
+        );
+    }
+
+    // Guy's on-screen test (2026-10-01, FR11): the price's real origin, never « manuel » for a
+    // fetched price; the yearly data's provenance in one line.
+    #[test]
+    fn the_trace_names_the_real_origin_of_the_price() {
+        use steadyinvest_contract::PriceOrigin;
+        let mut j = full_judgment();
+        j.current_price = Some(money("227.21"));
+        let at = Timestamp("2026-10-01T09:00:00Z".to_string());
+        let o = |source, session: Option<&str>, freshness| PriceOrigin {
+            source,
+            at: at.clone(),
+            session_date: session.map(str::to_string),
+            freshness,
+        };
+        j.current_price_origin = Some(o(Source::Provider, Some("2026-09-30"), Freshness::Current));
+        assert_eq!(
+            trace_price(&j, NumberFormat::Comma),
+            "Prix actuel : 227,21 (fournisseur, séance du 30/09/2026)"
+        );
+        j.current_price_origin = Some(o(Source::Provider, None, Freshness::Stale));
+        assert_eq!(
+            trace_price(&j, NumberFormat::Comma),
+            "Prix actuel : 227,21 (fournisseur, récupéré le 01/10/2026 — périmé)"
+        );
+        j.current_price_origin = Some(o(Source::Manual, None, Freshness::Current));
+        assert_eq!(
+            trace_price(&j, NumberFormat::Comma),
+            "Prix actuel : 227,21 (saisi le 01/10/2026)"
+        );
+        j.current_price_origin = None;
+        assert_eq!(
+            trace_price(&j, NumberFormat::Comma),
+            "Prix actuel : 227,21 (origine non enregistrée)"
+        );
+        j.current_price = None;
+        assert_eq!(trace_price(&j, NumberFormat::Comma), "Prix actuel : —");
+    }
+
+    #[test]
+    fn the_trace_counts_the_yearly_data_by_origin() {
+        let empty = study_with(vec![], full_judgment());
+        assert_eq!(trace_yearly(&empty), "Données annuelles : —");
+        let mut study = study_with(
+            vec![year(2023, validated_cell), year(2024, validated_cell)],
+            full_judgment(),
+        );
+        // Typed cells only.
+        assert_eq!(trace_yearly(&study), "Données annuelles : 14 saisie(s)");
+        // One fetched cell, one validated AI proposal.
+        study.years[0].sales.source = Source::Provider;
+        study.years[0].sales.provenance.timestamp = Timestamp("2026-09-30T08:00:00Z".to_string());
+        study.years[1].eps.provenance.ai_origin = Some(steadyinvest_contract::AiOrigin {
+            draft_id: Uuid::from_u128(1),
+            client: "c".to_string(),
+            model: "m".to_string(),
+            validated_at: Timestamp("2026-10-01T08:00:00Z".to_string()),
+        });
+        assert_eq!(
+            trace_yearly(&study),
+            "Données annuelles : 1 du fournisseur (dernière récupération le 30/09/2026) · \
+             12 saisie(s) · 1 proposée(s) par l'IA et validée(s)"
+        );
+    }
+
+    #[test]
+    fn a_judgment_placed_by_a_validated_ai_proposal_says_so() {
+        let origin = steadyinvest_contract::AiOrigin {
+            draft_id: Uuid::from_u128(7),
+            client: "claude-code".to_string(),
+            model: "m".to_string(),
+            validated_at: Timestamp("2026-09-30T16:00:00Z".to_string()),
+        };
+        let v = Some(money("45.05"));
+        assert_eq!(
+            trace_input(
+                "PER haut moyen",
+                v,
+                DisplayField::PeRatio,
+                NumberFormat::Comma,
+                None
+            ),
+            "PER haut moyen : 45,1 (manuel)"
+        );
+        assert_eq!(
+            trace_input(
+                "PER haut moyen",
+                v,
+                DisplayField::PeRatio,
+                NumberFormat::Comma,
+                Some(&origin)
+            ),
+            "PER haut moyen : 45,1 (proposé par l'IA, validé le 30/09/2026)"
+        );
+        assert_eq!(
+            trace_input(
+                "PER haut moyen",
+                None,
+                DisplayField::PeRatio,
+                NumberFormat::Comma,
+                None
+            ),
+            "PER haut moyen : —"
         );
     }
 }

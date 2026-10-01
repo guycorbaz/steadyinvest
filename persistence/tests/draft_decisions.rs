@@ -48,6 +48,7 @@ fn study(low_pe: &str) -> Study {
             present_full_year_dividend: None,
             ttm_eps: None,
             ai_placed: Default::default(),
+            current_price_origin: None,
         },
         rationale: None,
         company_name: None,

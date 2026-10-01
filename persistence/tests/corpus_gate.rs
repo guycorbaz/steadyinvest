@@ -87,6 +87,7 @@ fn canonical_study() -> Study {
         ],
         judgment: Judgment {
             ai_placed: Default::default(),
+            current_price_origin: None,
             estimated_high_eps: Some(money("5.20")),
             estimated_low_eps: Some(money("2.10")),
             // The four issue-#14 fields stay `None` in the frozen corpus: the committed v1.db

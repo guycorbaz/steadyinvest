@@ -1042,7 +1042,10 @@ mod tests {
             crate::viewmodel::engine::USER_FACING_LABELS.len(),
             // G1 M (#237): the years a comparison cell's §2 average runs over (AVG_OVER_ONE_YEAR,
             // AVG_OVER_YEARS): 23 + 2 = 25.
-            25,
+            // Guy's on-screen test (2026-10-01, FR11): the price's origin (provider with session or
+            // fetch date, typed, unknown) and the yearly data's provenance line (title + three
+            // parts) and a judgment placed by a validated AI proposal: 25 + 9 = 34.
+            34,
             "engine.rs label inventory changed — register the new label"
         );
     }

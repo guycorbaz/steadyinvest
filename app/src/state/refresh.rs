@@ -8,7 +8,7 @@
 
 use rust_decimal::Decimal;
 use steadyinvest_contract::{
-    Cell, Coverage, Freshness, Money, Provenance, Review, Source, Study, YearData,
+    Cell, Coverage, Freshness, Money, PriceOrigin, Provenance, Review, Source, Study, YearData,
 };
 use steadyinvest_ingestion::{CanonicalYear, FetchedFinancials};
 use uuid::Uuid;
@@ -102,6 +102,8 @@ impl JournalState {
         // Story 4.4 (AC2/AC6): the latest `/eod` close is the present market price for the §4 zone.
         // `None` for a provider with no current price → `current_price` left untouched (pre-4.4 shape).
         let latest_price = fetched.latest_price;
+        let price_at = self.clock.now();
+        let price_session = fetched.latest_session_date.clone();
         // Issue #113: the trailing-twelve-months EPS (current-P/E denominator), a present market fact
         // riding alongside the price (not part of the canonical annual calc).
         let ttm_eps = fetched.ttm_eps;
@@ -141,6 +143,14 @@ impl JournalState {
             // moved (a price-only refresh). `None` → unchanged.
             if let Some(price) = latest_price {
                 study.judgment.current_price = Some(Money::from(price));
+                // Guy's on-screen test (2026-10-01, FR11): the price's origin — the provider, now,
+                // its session date — so the traceability names it and a failed refresh can flag it.
+                study.judgment.current_price_origin = Some(PriceOrigin {
+                    source: Source::Provider,
+                    at: price_at.clone(),
+                    session_date: price_session.clone(),
+                    freshness: Freshness::Current,
+                });
             }
             // Issue #113: fill the trailing-twelve-months EPS (the current-P/E denominator) — another
             // present *market fact* like `current_price`, in the SAME mutation. `None` → unchanged
@@ -198,8 +208,16 @@ impl JournalState {
         price: Decimal,
         session_date: Option<String>,
     ) -> Result<(), String> {
+        let at = self.clock.now();
+        let session = session_date.clone();
         self.mutate_study(study_id, move |study| {
             study.judgment.current_price = Some(Money::from(price));
+            study.judgment.current_price_origin = Some(PriceOrigin {
+                source: Source::Provider,
+                at,
+                session_date: session,
+                freshness: Freshness::Current,
+            });
         })?;
         // Story 5.1: cache the close into the price-history trajectory (confront's source). Issue #72:
         // keyed by the provider's real trading-session date when it supplied one (EODHD `/eod`), else
@@ -243,6 +261,15 @@ impl JournalState {
                         flagged += 1;
                     }
                 }
+            }
+            // Guy's on-screen test (2026-10-01, FR23): a fetched current price is provider data
+            // too — the failed refresh flags it stale (last-known value kept).
+            if let Some(origin) = study.judgment.current_price_origin.as_mut()
+                && origin.source == Source::Provider
+                && origin.freshness != Freshness::Stale
+            {
+                origin.freshness = Freshness::Stale;
+                flagged += 1;
             }
             count_ref.set(flagged);
         })?;
@@ -352,6 +379,13 @@ fn count_provider_to_stale(study: &Study) -> usize {
         })
         .filter(|c| c.source == Source::Provider && c.freshness != Freshness::Stale)
         .count()
+        + usize::from(
+            study
+                .judgment
+                .current_price_origin
+                .as_ref()
+                .is_some_and(|o| o.source == Source::Provider && o.freshness != Freshness::Stale),
+        )
 }
 
 /// Issue #252: the method a provider figure was fetched under — the `@ssg-X.Y.Z` suffix of its

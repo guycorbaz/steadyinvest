@@ -8,8 +8,8 @@
 //! change.
 
 use steadyinvest_contract::{
-    Cell, Coverage, DraftField, ForecastLowOption, Judgment, Money, PendingProvider, Provenance,
-    Review, Study,
+    Cell, Coverage, DraftField, ForecastLowOption, Freshness, Judgment, Money, PendingProvider,
+    Provenance, Review, Source, Study,
 };
 use uuid::Uuid;
 
@@ -512,8 +512,24 @@ impl JournalState {
         field: &str,
         value: Option<Money>,
     ) -> Result<(), String> {
-        self.mutate_judgment(study_id, |judgment| {
-            apply_judgment_field(judgment, field, value)
+        // Guy's on-screen test (2026-10-01, FR11): a typed current price records its origin — the
+        // owner, now — so the traceability never calls a fetched price « manuel » nor the reverse.
+        let now = self.clock.now();
+        self.mutate_judgment(study_id, move |judgment| {
+            let before = judgment.current_price;
+            let known = apply_judgment_field(judgment, field, value);
+            if known && field == "current_price" && judgment.current_price != before {
+                judgment.current_price_origin =
+                    judgment
+                        .current_price
+                        .map(|_| steadyinvest_contract::PriceOrigin {
+                            source: Source::Manual,
+                            at: now.clone(),
+                            session_date: None,
+                            freshness: Freshness::Current,
+                        });
+            }
+            known
         })
     }
 

@@ -1499,7 +1499,7 @@ export component StudyScreen inherits Rectangle {
         background: Tokens.bg.with-alpha(0.6);
         TouchArea { clicked => { Studies.close-traceability(); } }
         Rectangle {
-            width: Math.min(parent.width - Tokens.space-48, 560px);
+            width: Math.min(parent.width - Tokens.space-48, 680px);
             height: Math.min(parent.height - Tokens.space-48, panel.preferred-height);
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
@@ -1512,12 +1512,18 @@ export component StudyScreen inherits Rectangle {
                 padding: Tokens.space-16;
                 spacing: Tokens.space-12;
 
+                // Guy's on-screen test (2026-10-01): « Fermer » sat half over the frame — the title
+                // never shrank. It now wraps in its own share of the row; the button keeps its size.
                 HorizontalLayout {
+                    spacing: Tokens.space-12;
                     Text {
                         text: Studies.trace.title;
                         color: Tokens.text-high;
                         font-size: Tokens.font-h3;
                         font-weight: Tokens.weight-semibold;
+                        wrap: word-wrap;
+                        vertical-alignment: center;
+                        min-width: 0;
                         horizontal-stretch: 1;
                     }
                     ActionButton {
@@ -1536,6 +1542,7 @@ export component StudyScreen inherits Rectangle {
                     text: line;
                     color: Tokens.text-mid;
                     font-size: Tokens.font-caption;
+                    wrap: word-wrap; // a long provenance line wraps, never clipped
                 }
 
                 Text {
@@ -1562,6 +1569,7 @@ export component StudyScreen inherits Rectangle {
                     text: gate;
                     color: Tokens.text-low;
                     font-size: Tokens.font-caption;
+                    wrap: word-wrap;
                 }
             }
         }

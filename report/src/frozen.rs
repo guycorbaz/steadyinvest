@@ -227,6 +227,7 @@ mod tests {
             present_full_year_dividend: None,
             ttm_eps: None,
             ai_placed: AiPlaced::default(),
+            current_price_origin: None,
         };
         let mut s = Study::new(
             Uuid::from_u128(1),

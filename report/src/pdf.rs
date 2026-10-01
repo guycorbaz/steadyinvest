@@ -3644,6 +3644,7 @@ mod tests {
     fn demo_study() -> Study {
         let judgment = Judgment {
             ai_placed: Default::default(),
+            current_price_origin: None,
             estimated_high_eps: Some(money_of("9")),
             estimated_low_eps: Some(money_of("4")),
             projected_sales_growth_pct: None,
