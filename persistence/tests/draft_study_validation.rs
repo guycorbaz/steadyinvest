@@ -33,6 +33,7 @@ fn empty_judgment() -> Judgment {
         present_full_year_dividend: None,
         ttm_eps: None,
         ai_placed: Default::default(),
+        current_price_origin: None,
     }
 }
 

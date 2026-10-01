@@ -904,6 +904,7 @@ mod tests {
     fn judgment(est_high_eps: Option<Money>) -> Judgment {
         Judgment {
             ai_placed: Default::default(),
+            current_price_origin: None,
             estimated_high_eps: est_high_eps,
             estimated_low_eps: Some(money("3")),
             projected_sales_growth_pct: None,

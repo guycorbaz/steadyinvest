@@ -261,6 +261,7 @@ fn year_to_data(y: &FixtureYear, provenance: &Provenance) -> YearData {
 fn judgment_from(j: &FixtureJudgment) -> Judgment {
     Judgment {
         ai_placed: Default::default(),
+        current_price_origin: None,
         estimated_high_eps: j.estimated_high_eps.map(Money::from),
         estimated_low_eps: j.estimated_low_eps.map(Money::from),
         projected_sales_growth_pct: j.projected_sales_growth_pct.map(Money::from),

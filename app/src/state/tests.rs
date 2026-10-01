@@ -10597,6 +10597,25 @@ mod frozen_8_8 {
 
     // AC 1, 6, 9 — a verdict not full refuses the freeze with its open inputs named; an owner edit
     // after the freeze reads « modification de votre part ».
+    // G3 review (2026-10-01): the current price records its origin — a price typed after the
+    // freeze reads « modification de votre part », not a refresh nor « cause inconnue ».
+    #[test]
+    fn a_price_typed_after_the_freeze_is_the_owners_edit() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = full_state(&dir);
+        state.freeze_verdict(id).unwrap();
+        backdate(&mut state, id);
+        state
+            .set_judgment_field(id, "current_price", Some(und_money(75)))
+            .unwrap();
+        match strip(&state, id) {
+            StripView::Differs { comparison, .. } => {
+                assert_eq!(comparison.cause, "modification de votre part");
+            }
+            other => panic!("expected a difference, got {other:?}"),
+        }
+    }
+
     #[test]
     fn a_verdict_not_full_is_refused_and_an_owner_edit_is_named() {
         let dir = TempDir::new().unwrap();
@@ -10787,5 +10806,246 @@ mod validate_year {
 
     fn state_year_validated_message(year: i32, validated: usize, left: usize) -> String {
         crate::state::year_validated_message(year, validated, left)
+    }
+}
+
+// ── Guy's on-screen test (2026-10-01) — the current price's origin (FR11 / FR12 / FR23) ──
+mod price_origin {
+    use super::*;
+    use steadyinvest_contract::PriceOrigin;
+
+    const NOW: &str = "2026-10-01T09:00:00Z";
+    const YEARS: [i32; 5] = [2020, 2021, 2022, 2023, 2024];
+
+    fn origin(state: &JournalState, id: Uuid) -> Option<PriceOrigin> {
+        state.get_study(id).unwrap().judgment.current_price_origin
+    }
+
+    /// Move the price's origin to the day before (the fixed test clock stamps every write NOW).
+    fn yesterday(state: &mut JournalState, id: Uuid) {
+        state
+            .mutate_study(id, |s| {
+                s.judgment.current_price_origin.as_mut().unwrap().at =
+                    Timestamp("2026-09-30T09:00:00Z".to_string())
+            })
+            .unwrap();
+    }
+
+    /// Every load-bearing cell validated and the four judgments set — the verdict then hangs on
+    /// the price alone.
+    fn ready(state: &mut JournalState, id: Uuid) {
+        for y in 0..YEARS.len() {
+            state.validate_year(id, y).unwrap();
+        }
+        for (field, v) in [
+            ("est_high_eps", 8),
+            ("est_low_eps", 6),
+            ("high_pe", 20),
+            ("low_pe", 10),
+        ] {
+            state
+                .set_judgment_field(id, field, Some(und_money(v)))
+                .unwrap();
+        }
+    }
+
+    fn verdict_open(state: &JournalState, id: Uuid) -> Option<String> {
+        let study = state.get_study(id).unwrap();
+        engine::open_inputs(&engine::build_snapshot(&study).unwrap())
+    }
+
+    #[test]
+    fn a_fetched_price_records_the_provider_its_session_and_the_moment() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x9A, NOW);
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let fetched = FetchedFinancials {
+            latest_session_date: Some("2026-09-30".to_string()),
+            ..fetched_with_price(&YEARS, 60)
+        };
+        state.apply_provider_refresh(id, &fetched).unwrap();
+        assert_eq!(
+            origin(&state, id),
+            Some(PriceOrigin {
+                source: Source::Provider,
+                at: Timestamp(NOW.to_string()),
+                session_date: Some("2026-09-30".to_string()),
+                freshness: Freshness::Current,
+            })
+        );
+        // The holdings price refresh does the same, without a session date when none is given.
+        state
+            .apply_holding_price(id, rust_decimal::Decimal::new(61, 0), None)
+            .unwrap();
+        let o = origin(&state, id).unwrap();
+        assert_eq!((o.source, o.session_date), (Source::Provider, None));
+    }
+
+    #[test]
+    fn a_typed_price_is_the_owners_and_clearing_it_clears_its_origin() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x9B, NOW);
+        let id = state.create_study("NESN", "CHF").unwrap();
+        state
+            .set_judgment_field(id, "current_price", Some(und_money(55)))
+            .unwrap();
+        let o = origin(&state, id).unwrap();
+        assert_eq!(
+            (o.source, o.freshness),
+            (Source::Manual, Freshness::Current)
+        );
+        // Another judgment field leaves the price's origin alone.
+        state
+            .set_judgment_field(id, "high_pe", Some(und_money(20)))
+            .unwrap();
+        assert_eq!(origin(&state, id).unwrap().source, Source::Manual);
+        state.set_judgment_field(id, "current_price", None).unwrap();
+        assert_eq!(origin(&state, id), None);
+    }
+
+    #[test]
+    fn a_failed_refresh_flags_the_fetched_price_stale_and_the_verdict_names_it() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x9C, NOW);
+        let id = state.create_study("NESN", "CHF").unwrap();
+        state
+            .apply_provider_refresh(id, &fetched_with_price(&YEARS, 60))
+            .unwrap();
+        ready(&mut state, id);
+        assert_eq!(
+            verdict_open(&state, id),
+            None,
+            "a fresh fetched price: Full"
+        );
+        // The failed refresh: provider cells AND the fetched price (of an earlier day) are flagged.
+        yesterday(&mut state, id);
+        let cells: usize = state
+            .get_study(id)
+            .unwrap()
+            .years
+            .iter()
+            .map(|y| {
+                [&y.sales, &y.eps, &y.high_price, &y.low_price]
+                    .iter()
+                    .filter(|c| c.source == Source::Provider)
+                    .count()
+            })
+            .sum();
+        let flagged = state.mark_provider_stale(id).unwrap();
+        assert_eq!(flagged, cells + 1, "every provider cell plus the price");
+        assert_eq!(origin(&state, id).unwrap().freshness, Freshness::Stale);
+        let open = verdict_open(&state, id).expect("no longer Full");
+        assert!(open.contains("Prix actuel — périmé"), "{open}");
+        // A successful refresh makes it current again, and the verdict Full again.
+        state
+            .apply_provider_refresh(id, &fetched_with_price(&YEARS, 62))
+            .unwrap();
+        assert_eq!(origin(&state, id).unwrap().freshness, Freshness::Current);
+        assert_eq!(verdict_open(&state, id), None, "Full again");
+    }
+
+    // G3 review: a quote fetched TODAY (say by the holdings price refresh) stays current when a
+    // later fundamentals fetch fails — the EODHD free-tier case.
+    #[test]
+    fn a_price_fetched_today_is_not_flagged_by_a_failed_study_refresh() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x9E, NOW);
+        let id = state.create_study("NESN", "CHF").unwrap();
+        state
+            .apply_provider_refresh(id, &fetched_for(&YEARS))
+            .unwrap();
+        state
+            .apply_holding_price(id, rust_decimal::Decimal::new(61, 0), None)
+            .unwrap();
+        state.mark_provider_stale(id).unwrap();
+        assert_eq!(origin(&state, id).unwrap().freshness, Freshness::Current);
+    }
+
+    // G3 review: the same quote again writes nothing — no undo step, no history entry.
+    #[test]
+    fn the_same_quote_again_writes_nothing() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x9F, NOW);
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let fetched = FetchedFinancials {
+            latest_session_date: Some("2026-09-30".to_string()),
+            ..fetched_with_price(&YEARS, 60)
+        };
+        state.apply_provider_refresh(id, &fetched).unwrap();
+        yesterday(&mut state, id);
+        let depth = state.undo_depth();
+        let before = state.get_study(id).unwrap();
+        state.apply_provider_refresh(id, &fetched).unwrap();
+        state
+            .apply_holding_price(
+                id,
+                rust_decimal::Decimal::new(60, 0),
+                Some("2026-09-30".to_string()),
+            )
+            .unwrap();
+        assert_eq!(state.undo_depth(), depth, "no phantom undo step");
+        assert_eq!(state.get_study(id).unwrap(), before, "nothing rewritten");
+        // A new session's quote does write.
+        state
+            .apply_holding_price(
+                id,
+                rust_decimal::Decimal::new(60, 0),
+                Some("2026-10-01".to_string()),
+            )
+            .unwrap();
+        assert_eq!(
+            origin(&state, id).unwrap().session_date.as_deref(),
+            Some("2026-10-01")
+        );
+    }
+
+    // G3 review: a failed holdings price refresh flags the study's fetched price too.
+    #[test]
+    fn a_failed_holdings_price_refresh_flags_the_studys_price() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0xA0, NOW);
+        let id = state.create_study("NESN.SW", "CHF").unwrap();
+        state
+            .apply_holding_price(id, rust_decimal::Decimal::new(60, 0), None)
+            .unwrap();
+        assert_eq!(
+            state.mark_price_stale_for_ticker("nesn.sw").unwrap(),
+            0,
+            "fetched today"
+        );
+        yesterday(&mut state, id);
+        assert_eq!(state.mark_price_stale_for_ticker("nesn.sw").unwrap(), 1);
+        let o = origin(&state, id).unwrap();
+        assert_eq!(
+            (o.source, o.freshness),
+            (Source::Provider, Freshness::Stale)
+        );
+        assert_eq!(
+            state.mark_price_stale_for_ticker("nesn.sw").unwrap(),
+            0,
+            "already stale"
+        );
+        // A study with no provider cell and a fetched price: a failed study refresh flags the
+        // price alone (the pre-check counts it).
+        state
+            .apply_holding_price(id, rust_decimal::Decimal::new(61, 0), None)
+            .unwrap();
+        yesterday(&mut state, id);
+        assert_eq!(state.mark_provider_stale(id).unwrap(), 1, "the price alone");
+    }
+
+    #[test]
+    fn a_typed_price_is_never_flagged_by_a_failed_refresh() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0x9D, NOW);
+        let id = state.create_study("NESN", "CHF").unwrap();
+        state
+            .apply_provider_refresh(id, &fetched_for(&YEARS))
+            .unwrap();
+        state
+            .set_judgment_field(id, "current_price", Some(und_money(55)))
+            .unwrap();
+        state.mark_provider_stale(id).unwrap();
+        assert_eq!(origin(&state, id).unwrap().freshness, Freshness::Current);
     }
 }

@@ -24,6 +24,7 @@ fn minimal_study(id: u128, journal_id: Uuid) -> Study {
         years: Vec::new(),
         judgment: Judgment {
             ai_placed: Default::default(),
+            current_price_origin: None,
             estimated_high_eps: Some(money("5.20")),
             estimated_low_eps: None,
             projected_sales_growth_pct: None,

@@ -133,6 +133,7 @@ fn judgment() -> impl Strategy<Value = Judgment> {
             |(hi, lo, sales_growth, eps_growth, php, plp, opt, severe_low, cur, dividend)| {
                 Judgment {
                     ai_placed: Default::default(),
+                    current_price_origin: None,
                     estimated_high_eps: hi,
                     estimated_low_eps: lo,
                     projected_sales_growth_pct: sales_growth,

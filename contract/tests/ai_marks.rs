@@ -57,6 +57,7 @@ fn study() -> Study {
         ttm_eps: None,
         present_full_year_dividend: None,
         ai_placed: AiPlaced::default(),
+        current_price_origin: None,
     };
     let mut s = Study::new(
         Uuid::from_u128(1),

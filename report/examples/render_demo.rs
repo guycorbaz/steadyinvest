@@ -29,6 +29,7 @@ fn cell(value: &str) -> Cell {
 fn main() {
     let judgment = Judgment {
         ai_placed: Default::default(),
+        current_price_origin: None,
         estimated_high_eps: Some(money_of("6.2")),
         estimated_low_eps: Some(money_of("3.4")),
         projected_sales_growth_pct: Some(money_of("4")),

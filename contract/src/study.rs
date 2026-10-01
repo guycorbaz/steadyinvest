@@ -4,7 +4,7 @@
 //! them directly. New/optional fields use `#[serde(default)]` for forward-compatibility.
 
 use crate::ai::AiOrigin;
-use crate::cell::Cell;
+use crate::cell::{Cell, Freshness, Source};
 use crate::money::Money;
 use crate::provenance::Timestamp;
 use crate::versioning::SCHEMA_VERSION;
@@ -103,6 +103,27 @@ pub struct Judgment {
     /// byte-identically to before.
     #[serde(default, skip_serializing_if = "AiPlaced::is_empty")]
     pub ai_placed: AiPlaced,
+    /// Where `current_price` came from and when (Guy's on-screen test 2026-10-01, FR11/FR12): the
+    /// provider (a fetch or a holdings price refresh) or the owner's typing, the moment it was
+    /// written, the provider's trading-session date when known, and its freshness — a failed
+    /// refresh flags it stale like the provider cells (FR23). `None` = unknown origin (a price
+    /// written before this field existed). Additive and skipped when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_price_origin: Option<PriceOrigin>,
+}
+
+/// The origin of the current price (see [`Judgment::current_price_origin`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PriceOrigin {
+    /// `Provider` (fetched) or `Manual` (typed by the owner).
+    pub source: Source,
+    /// When the price was written (RFC 3339 UTC, the app clock).
+    pub at: Timestamp,
+    /// The provider's trading-session date of the close (`YYYY-MM-DD`), when it supplied one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_date: Option<String>,
+    /// `Stale` after a failed refresh (FR23); a successful refresh or a typed price is `Current`.
+    pub freshness: Freshness,
 }
 
 /// The "placed by AI" marks of a [`Judgment`] — exactly the nine draftable judgment fields
@@ -239,6 +260,7 @@ mod tests {
     fn empty_judgment() -> Judgment {
         Judgment {
             ai_placed: Default::default(),
+            current_price_origin: None,
             estimated_high_eps: None,
             estimated_low_eps: None,
             projected_sales_growth_pct: None,

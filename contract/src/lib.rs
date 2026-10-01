@@ -45,6 +45,6 @@ pub use frozen::{
 };
 pub use money::Money;
 pub use provenance::{Provenance, Timestamp};
-pub use study::{AiPlaced, ForecastLowOption, Judgment, Note, Study, YearData};
+pub use study::{AiPlaced, ForecastLowOption, Judgment, Note, PriceOrigin, Study, YearData};
 pub use text::is_blank;
 pub use versioning::SCHEMA_VERSION;

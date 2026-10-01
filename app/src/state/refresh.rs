@@ -8,7 +8,8 @@
 
 use rust_decimal::Decimal;
 use steadyinvest_contract::{
-    Cell, Coverage, Freshness, Money, Provenance, Review, Source, Study, YearData,
+    Cell, Coverage, Freshness, Money, PriceOrigin, Provenance, Review, Source, Study, Timestamp,
+    YearData,
 };
 use steadyinvest_ingestion::{CanonicalYear, FetchedFinancials};
 use uuid::Uuid;
@@ -102,6 +103,8 @@ impl JournalState {
         // Story 4.4 (AC2/AC6): the latest `/eod` close is the present market price for the §4 zone.
         // `None` for a provider with no current price → `current_price` left untouched (pre-4.4 shape).
         let latest_price = fetched.latest_price;
+        let price_at = self.clock.now();
+        let price_session = fetched.latest_session_date.clone();
         // Issue #113: the trailing-twelve-months EPS (current-P/E denominator), a present market fact
         // riding alongside the price (not part of the canonical annual calc).
         let ttm_eps = fetched.ttm_eps;
@@ -140,7 +143,15 @@ impl JournalState {
             // `mutate_study`'s `before != study` guard persists/records this even when no yearly cell
             // moved (a price-only refresh). `None` → unchanged.
             if let Some(price) = latest_price {
-                study.judgment.current_price = Some(Money::from(price));
+                // Guy's on-screen test (2026-10-01, FR11): the price's origin — the provider, when,
+                // its session date — so the traceability names it and a failed refresh can flag it.
+                // The same quote again keeps its origin (no write, no undo step, no history entry).
+                set_provider_price(
+                    &mut study.judgment,
+                    Money::from(price),
+                    &price_at,
+                    price_session.clone(),
+                );
             }
             // Issue #113: fill the trailing-twelve-months EPS (the current-P/E denominator) — another
             // present *market fact* like `current_price`, in the SAME mutation. `None` → unchanged
@@ -198,8 +209,10 @@ impl JournalState {
         price: Decimal,
         session_date: Option<String>,
     ) -> Result<(), String> {
+        let at = self.clock.now();
+        let session = session_date.clone();
         self.mutate_study(study_id, move |study| {
-            study.judgment.current_price = Some(Money::from(price));
+            set_provider_price(&mut study.judgment, Money::from(price), &at, session);
         })?;
         // Story 5.1: cache the close into the price-history trajectory (confront's source). Issue #72:
         // keyed by the provider's real trading-session date when it supplied one (EODHD `/eod`), else
@@ -208,6 +221,33 @@ impl JournalState {
             self.cache_close(&study.security_ticker, price, session_date.as_deref());
         }
         Ok(())
+    }
+
+    /// A holdings price refresh for `ticker` failed or brought no quote (G3 review, FR23): every
+    /// study of that ticker whose price was fetched before today is flagged stale — the same rule
+    /// as [`Self::mark_provider_stale`] for the price. Returns how many studies were flagged.
+    pub fn mark_price_stale_for_ticker(&mut self, ticker: &str) -> Result<usize, String> {
+        let today = self.clock.now();
+        let ids: Vec<Uuid> = self
+            .try_list_studies()?
+            .into_iter()
+            .filter(|s| super::watchlist::same_ticker(&s.security_ticker, ticker))
+            .map(|s| s.id)
+            .collect();
+        let mut flagged = 0usize;
+        for id in ids {
+            let due = self
+                .get_study(id)
+                .is_some_and(|s| price_would_go_stale(&s.judgment, &today));
+            if due {
+                let today = today.clone();
+                self.mutate_study(id, move |study| {
+                    flag_price_stale(&mut study.judgment, &today);
+                })?;
+                flagged += 1;
+            }
+        }
+        Ok(flagged)
     }
 
     /// Flag the open study's **provider-sourced** cells `Freshness::Stale` after a failed (or
@@ -220,6 +260,7 @@ impl JournalState {
     /// already-stale cell is left untouched, so `mutate_study`'s `before != study` guard records no
     /// phantom undo step). Routed through the atomic [`Self::mutate_study`] rail.
     pub fn mark_provider_stale(&mut self, study_id: Uuid) -> Result<usize, String> {
+        let today = self.clock.now();
         // Pre-check: if there is nothing to flag (no provider cells, or all already stale), return a
         // true no-op WITHOUT entering `mutate_study` — so a failed refresh on an already-stale study
         // (repeated offline retries), an empty study, or a manual-only study writes no journal
@@ -227,13 +268,14 @@ impl JournalState {
         // Synology-sync corruption risk makes avoidable writes worth suppressing).
         let candidates = self
             .get_study(study_id)
-            .map(|s| count_provider_to_stale(&s))
+            .map(|s| count_provider_to_stale(&s, &today))
             .unwrap_or(0);
         if candidates == 0 {
             return Ok(0);
         }
         let count = std::cell::Cell::new(0usize);
         let count_ref = &count;
+        let today = today.clone();
         self.mutate_study(study_id, move |study| {
             let mut flagged = 0usize;
             for year in &mut study.years {
@@ -243,6 +285,11 @@ impl JournalState {
                         flagged += 1;
                     }
                 }
+            }
+            // Guy's on-screen test (2026-10-01, FR23): a fetched current price is provider data
+            // too — the failed refresh flags it stale (last-known value kept).
+            if flag_price_stale(&mut study.judgment, &today) {
+                flagged += 1;
             }
             count_ref.set(flagged);
         })?;
@@ -333,7 +380,7 @@ fn year_cells_mut(year: &mut YearData) -> Vec<&mut Cell> {
 
 /// How many provider cells of `study` are not yet `Stale` — the [`JournalState::mark_provider_stale`]
 /// pre-check (a `&Study` read, no mutation), so a no-op failure writes no journal revision.
-fn count_provider_to_stale(study: &Study) -> usize {
+fn count_provider_to_stale(study: &Study, today: &Timestamp) -> usize {
     study
         .years
         .iter()
@@ -352,6 +399,62 @@ fn count_provider_to_stale(study: &Study) -> usize {
         })
         .filter(|c| c.source == Source::Provider && c.freshness != Freshness::Stale)
         .count()
+        + usize::from(price_would_go_stale(&study.judgment, today))
+}
+
+/// Write a provider quote and its origin (Guy's on-screen test 2026-10-01, FR11). The SAME quote
+/// for the same session, already current, keeps its origin untouched — a repeated refresh writes
+/// nothing (no undo step, no history entry, no `logical_version` bump; the timestamp-churn trap).
+fn set_provider_price(
+    judgment: &mut steadyinvest_contract::Judgment,
+    price: Money,
+    at: &Timestamp,
+    session_date: Option<String>,
+) {
+    let unchanged = judgment.current_price == Some(price)
+        && judgment.current_price_origin.as_ref().is_some_and(|o| {
+            o.source == Source::Provider
+                && o.freshness == Freshness::Current
+                && o.session_date == session_date
+        });
+    if unchanged {
+        return;
+    }
+    judgment.current_price = Some(price);
+    judgment.current_price_origin = Some(PriceOrigin {
+        source: Source::Provider,
+        at: at.clone(),
+        session_date,
+        freshness: Freshness::Current,
+    });
+}
+
+/// The UTC day of a stamp (`2026-10-01`).
+fn day_of(t: &Timestamp) -> &str {
+    t.0.get(..10).unwrap_or(&t.0)
+}
+
+/// Would a failed refresh flag this study's price stale? Only a fetched price, not already stale,
+/// and NOT one written today: a quote fetched today (say by the holdings price refresh) stays
+/// current when a later fundamentals fetch fails (the EODHD free-tier case — G3 review).
+fn price_would_go_stale(judgment: &steadyinvest_contract::Judgment, today: &Timestamp) -> bool {
+    judgment.current_price.is_some()
+        && judgment.current_price_origin.as_ref().is_some_and(|o| {
+            o.source == Source::Provider
+                && o.freshness != Freshness::Stale
+                && day_of(&o.at) != day_of(today)
+        })
+}
+
+/// Flag the price stale when [`price_would_go_stale`]; `true` when it did.
+fn flag_price_stale(judgment: &mut steadyinvest_contract::Judgment, today: &Timestamp) -> bool {
+    if !price_would_go_stale(judgment, today) {
+        return false;
+    }
+    if let Some(origin) = judgment.current_price_origin.as_mut() {
+        origin.freshness = Freshness::Stale;
+    }
+    true
 }
 
 /// Issue #252: the method a provider figure was fetched under — the `@ssg-X.Y.Z` suffix of its

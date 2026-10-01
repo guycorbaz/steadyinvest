@@ -76,6 +76,7 @@ mod tests {
             "CHF",
             Judgment {
                 ai_placed: Default::default(),
+                current_price_origin: None,
                 estimated_high_eps: None,
                 estimated_low_eps: None,
                 projected_sales_growth_pct: None,

@@ -90,6 +90,7 @@ mod tests {
             .collect();
         study.judgment = Judgment {
             ai_placed: Default::default(),
+            current_price_origin: None,
             estimated_high_eps: Some(money("2.00")),
             estimated_low_eps: Some(money("1.50")),
             projected_sales_growth_pct: None,

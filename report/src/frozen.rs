@@ -99,6 +99,27 @@ pub fn causes(
         match key.as_str() {
             // No provenance on these: a refresh seen since the freeze, else unknown (the
             // holdings price writes the current price too).
+            // The current price records its origin (G3 review, 2026-10-01): a price typed since the
+            // freeze is the owner's edit, a fetched one the refresh of that day. Without a recorded
+            // origin (an older price), the TTM EPS too: a refresh seen since the freeze, else
+            // unknown (the holdings price writes the current price as well).
+            "j.current_price"
+                if study
+                    .judgment
+                    .current_price_origin
+                    .as_ref()
+                    .is_some_and(|o| since(&o.at)) =>
+            {
+                let o = study
+                    .judgment
+                    .current_price_origin
+                    .as_ref()
+                    .expect("guarded");
+                match o.source {
+                    Source::Provider => refresh = latest(refresh, &o.at),
+                    _ => owner = true,
+                }
+            }
             "j.current_price" | "q.ttm_quarterly_eps" => match &any_refresh {
                 Some(t) => refresh = latest(refresh, t),
                 None => unknown = true,
@@ -227,6 +248,7 @@ mod tests {
             present_full_year_dividend: None,
             ttm_eps: None,
             ai_placed: AiPlaced::default(),
+            current_price_origin: None,
         };
         let mut s = Study::new(
             Uuid::from_u128(1),

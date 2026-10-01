@@ -15,6 +15,8 @@
 //! Recorded interpretations (unchanged from the original `app` home):
 //! - **`judgment_to_gate_state`**: a present judgment value is `ValidatedFresh` (the user's own typed
 //!   number, not provider data awaiting sign-off); `None` → `Missing`.
+//!   Exception (2026-10-01): the current price goes through **`price_to_gate_state`** — a fetched
+//!   price flagged stale by a failed refresh is `Stale` (FR12 / FR23, method spec §5).
 //! - **`to_observations`**: v1 carries no quarterly data → [`QuarterlyObservations::empty`].
 //! - **splits**: v1 manual entry records no split events → `splits: vec![]`.
 
@@ -155,6 +157,23 @@ pub fn judgment_to_gate_state(value: Option<Money>) -> GateState {
     }
 }
 
+/// The current price → [`GateState`] (Guy's on-screen test 2026-10-01, FR12 / FR23): `None` →
+/// `Missing`; a price whose provider origin was flagged stale by a failed refresh → `Stale` (the
+/// verdict degrades, as for a stale provider cell); otherwise `ValidatedFresh` — a fetched price
+/// is the owner's own gesture (he asked for the fetch), a typed one his own number.
+pub fn price_to_gate_state(
+    value: Option<Money>,
+    origin: Option<&steadyinvest_contract::PriceOrigin>,
+) -> GateState {
+    match (value, origin) {
+        (None, _) => GateState::Missing,
+        (Some(_), Some(o)) if o.freshness == steadyinvest_contract::Freshness::Stale => {
+            GateState::Stale
+        }
+        (Some(_), _) => GateState::ValidatedFresh,
+    }
+}
+
 /// Build [`InputGates`]: one [`YearGates`] per **usable** year (filter `canonical.years` on
 /// [`YearUsability::Usable`], read the matching study year's four load-bearing cells), plus the five
 /// load-bearing judgment gates — exactly the pinned catalogs, in catalog order.
@@ -183,7 +202,7 @@ pub fn to_input_gates(study: &Study, canonical: &CanonicalFinancials) -> InputGa
         judgment_to_gate_state(j.estimated_low_eps),
         judgment_to_gate_state(j.judged_avg_high_pe),
         judgment_to_gate_state(j.judged_avg_low_pe),
-        judgment_to_gate_state(j.current_price),
+        price_to_gate_state(j.current_price, j.current_price_origin.as_ref()),
     ];
     InputGates::new(year_gates, judgment_gates)
 }
@@ -407,6 +426,7 @@ mod tests {
     fn full_study() -> Study {
         let judgment = Judgment {
             ai_placed: Default::default(),
+            current_price_origin: None,
             estimated_high_eps: Some(money_of("9")),
             estimated_low_eps: Some(money_of("4")),
             projected_sales_growth_pct: None,
@@ -489,6 +509,41 @@ mod tests {
             snap.outputs(),
             frame.snapshot.outputs(),
             "one construction, no drift"
+        );
+    }
+
+    #[test]
+    fn the_price_gate_reads_its_origin() {
+        use steadyinvest_contract::{Freshness, PriceOrigin, Source, Timestamp};
+        let price = Some(Money::from(rust_decimal::Decimal::new(60, 0)));
+        let o = |source, freshness| PriceOrigin {
+            source,
+            at: Timestamp("2026-10-01T09:00:00Z".to_string()),
+            session_date: None,
+            freshness,
+        };
+        assert_eq!(price_to_gate_state(None, None), GateState::Missing);
+        assert_eq!(
+            price_to_gate_state(price, None),
+            GateState::ValidatedFresh,
+            "unknown origin"
+        );
+        assert_eq!(
+            price_to_gate_state(price, Some(&o(Source::Provider, Freshness::Current))),
+            GateState::ValidatedFresh
+        );
+        assert_eq!(
+            price_to_gate_state(price, Some(&o(Source::Provider, Freshness::Stale))),
+            GateState::Stale
+        );
+        assert_eq!(
+            price_to_gate_state(price, Some(&o(Source::Manual, Freshness::Current))),
+            GateState::ValidatedFresh
+        );
+        assert_eq!(
+            price_to_gate_state(None, Some(&o(Source::Provider, Freshness::Stale))),
+            GateState::Missing,
+            "no price: missing whatever its stale origin says"
         );
     }
 }

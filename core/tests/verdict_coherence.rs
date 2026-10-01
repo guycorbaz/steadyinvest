@@ -93,6 +93,7 @@ fn all_green_study() -> Study {
         .collect();
     study.judgment = Judgment {
         ai_placed: Default::default(),
+        current_price_origin: None,
         estimated_high_eps: Some(money("2.00")),
         estimated_low_eps: Some(money("1.50")),
         // The four fields added to `contract::Judgment` in Story 2.2 (issue #14). This glue
