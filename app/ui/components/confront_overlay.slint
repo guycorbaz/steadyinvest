@@ -41,8 +41,13 @@ export component ConfrontOverlay inherits Rectangle {
                 font-weight: Tokens.weight-semibold;
                 wrap: word-wrap;
             }
+            // FR50 (2026-10-01): which projection — the one decided (the frozen verdict), or today's
+            // study re-derived, said as such.
             Text {
-                text: @tr("Décision du {}", Confront.state.decision-date);
+                text: Confront.state.recorded
+                    ? @tr("Projection décidée : verdict figé le {}", Confront.state.decision-date)
+                    : @tr("Aucun verdict figé : bande recalculée avec l'étude actuelle (étude créée le {})", Confront.state.decision-date);
+                wrap: word-wrap;
                 color: Tokens.text-mid;
                 font-family: Tokens.font-numeric;
                 font-size: Tokens.font-caption;

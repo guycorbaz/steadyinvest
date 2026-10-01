@@ -30,6 +30,10 @@ pub struct ConfrontView {
     pub forecast_low: Option<Decimal>,
     /// The projection horizon (`core::method::FORECAST_HORIZON_YEARS`).
     pub horizon_years: u32,
+    /// FR50 (project review 2026-10-01): the band is the one RECORDED when the owner validated the
+    /// study (its frozen verdict, Story 8.8) — `false` when the study has none and the band is
+    /// re-derived from today's study (said as such on the overlay, never passed off as decided).
+    pub recorded: bool,
     /// The actual close trajectory since the decision, oldest-first: `(date, close)`.
     pub actual: Vec<(String, Decimal)>,
 }
@@ -53,6 +57,7 @@ impl JournalState {
             forecast_low: None,
             horizon_years: steadyinvest_core::method::FORECAST_HORIZON_YEARS,
             actual: Vec::new(),
+            recorded: false,
         };
         // Issue #95 tri-state: a read FAILURE is « étude indisponible », never the « pas encore
         // de cours enregistrés » empty state a true absence would show.
@@ -61,17 +66,37 @@ impl JournalState {
             Ok(None) => return empty(false, String::new()),
             Err(_) => return empty(true, String::new()),
         };
-        let decision_date: String = study.created_at.0.chars().take(10).collect();
-
-        // Recorded projection band — read-only snapshot from the stored judgment (no recompute of the
-        // verdict, no mutation): the §4 forecast bounds the study implied at the decision.
-        let (forecast_high, forecast_low) = engine::build_snapshot(&study)
-            .ok()
-            .map(|s| {
-                let rr = &s.outputs().risk_reward;
-                (rr.forecast_high, rr.forecast_low)
+        // FR50 (project review 2026-10-01): the projection DECIDED — the frozen verdict's band, dated
+        // the day the owner validated the study. A re-derivation from today's study drifts with every
+        // annual update, judgment move or method change (ssg-1.2.0 #252), so it is only the fallback
+        // for a study never validated — and the overlay says so.
+        let frozen_band = study.frozen_verdict.as_ref().and_then(|f| {
+            f.zones.as_ref().map(|z| {
+                (
+                    f.frozen_at.0.chars().take(10).collect::<String>(),
+                    z.forecast_high.as_decimal(),
+                    z.forecast_low.as_decimal(),
+                )
             })
-            .unwrap_or((None, None));
+        });
+        let (decision_date, forecast_high, forecast_low, recorded) = match frozen_band {
+            Some((at, high, low)) => (at, Some(high), Some(low), true),
+            None => {
+                let (high, low) = engine::build_snapshot(&study)
+                    .ok()
+                    .map(|s| {
+                        let rr = &s.outputs().risk_reward;
+                        (rr.forecast_high, rr.forecast_low)
+                    })
+                    .unwrap_or((None, None));
+                (
+                    study.created_at.0.chars().take(10).collect(),
+                    high,
+                    low,
+                    false,
+                )
+            }
+        };
 
         // Actual trajectory since the decision, oldest-first, from the price-history cache.
         let actual: Vec<(String, Decimal)> = self
@@ -92,6 +117,7 @@ impl JournalState {
             forecast_low,
             horizon_years: steadyinvest_core::method::FORECAST_HORIZON_YEARS,
             actual,
+            recorded,
         }
     }
 
