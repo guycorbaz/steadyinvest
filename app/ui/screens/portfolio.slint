@@ -218,10 +218,10 @@ export component PortfolioScreen inherits Rectangle {
                                             // band bottom) — the zone noun IS the fact. The key
                                             // comparisons stay OUTSIDE @tr (the register precedent).
                                             : candidate.zone == "neutral"
-                                                ? @tr("{} — zone : {}", candidate.ticker, Labels.zone-hold)
+                                                ? @tr("{} — {}", candidate.ticker, Labels.zone-hold.to-lowercase())
                                                 : candidate.zone == "sell"
-                                                    ? @tr("{} — zone : {}", candidate.ticker, Labels.zone-sell)
-                                                    : @tr("{} — zone : {}", candidate.ticker, Labels.zone-buy);
+                                                    ? @tr("{} — {}", candidate.ticker, Labels.zone-sell.to-lowercase())
+                                                    : @tr("{} — {}", candidate.ticker, Labels.zone-buy.to-lowercase());
                             vertical-alignment: center;
                             horizontal-stretch: 1;
                         }
@@ -662,7 +662,7 @@ export component PortfolioScreen inherits Rectangle {
                                 icon: "⚠";
                                 text: row.trigger-kind == "stop"
                                     ? @tr("Le prix a atteint votre stop.")
-                                    : @tr("Le prix est dans la zone de vente.");
+                                    : @tr("Le prix est dans la {}.", Labels.zone-sell.to-lowercase());
                                 horizontal-stretch: 1;
                             }
                             ActionButton {

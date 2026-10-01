@@ -905,6 +905,15 @@ export component SettingsScreen inherits Rectangle {
                     term: Labels.zone-buy;
                     definition: @tr("Le tiers bas de la fourchette de prix projetée.");
                 }
+                // FR63 review: the two other zones are defined too, in either label set.
+                GlossaryRow {
+                    term: Labels.zone-hold;
+                    definition: @tr("Le tiers médian de la fourchette de prix projetée.");
+                }
+                GlossaryRow {
+                    term: Labels.zone-sell;
+                    definition: @tr("Le tiers haut de la fourchette de prix projetée.");
+                }
                 GlossaryRow {
                     term: @tr("Ratio hausse / baisse");
                     definition: @tr("Le potentiel de hausse rapporté au risque de baisse.");

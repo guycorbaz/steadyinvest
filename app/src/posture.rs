@@ -850,6 +850,42 @@ mod tests {
         );
     }
 
+    /// FR63 (Guy's on-screen test + review, 2026-10-01): a zone noun is never hard-coded — it comes
+    /// from the active label set (`Labels.zone-*`), so the NAIC and neutral vocabularies are never
+    /// mixed. Scans every `@tr` literal and every Rust `MSG_*` for the six zone nouns of the label
+    /// table (case-insensitive). Exempt: `comparison.slint`, neutral by owner decision 2026-09-26
+    /// (« the report never carries the label-set words »), like the PDFs (report crate, unscanned).
+    #[test]
+    fn zone_nouns_come_from_the_label_set_never_hard_coded() {
+        let nouns: Vec<String> = crate::labels::LABELS
+            .iter()
+            .filter(|e| e.key.starts_with("zone-"))
+            .flat_map(|e| [e.naic, e.neutral])
+            .map(str::to_lowercase)
+            .collect();
+        assert_eq!(nouns.len(), 6, "three zones, two label sets");
+        let mut hits = Vec::new();
+        for path in slint_files() {
+            if path.ends_with("comparison.slint") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).unwrap();
+            for literal in tr_literals(&source) {
+                let lower = literal.to_lowercase();
+                if nouns.iter().any(|n| lower.contains(n.as_str())) {
+                    hits.push(format!("{}: « {literal} »", path.display()));
+                }
+            }
+        }
+        for message in crate::state::USER_FACING_MESSAGES {
+            let lower = message.to_lowercase();
+            if nouns.iter().any(|n| lower.contains(n.as_str())) {
+                hits.push(format!("MSG: « {message} »"));
+            }
+        }
+        assert!(hits.is_empty(), "hard-coded zone nouns: {hits:#?}");
+    }
+
     #[test]
     fn label_table_strings_are_neutral_no_banned_verb() {
         for entry in &crate::labels::LABELS {

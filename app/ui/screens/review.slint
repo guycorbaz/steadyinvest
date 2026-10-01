@@ -244,7 +244,7 @@ export component ReviewScreen inherits Rectangle {
                         // The study line: its state, the zone, U/D, relative value — an absent
                         // figure reads « — », never a dangling empty slot.
                         if row.linked: FactLine {
-                            text: @tr("Étude : {} · zone : {} · prix actuel : {} · H/B : {} · valeur relative : {}",
+                            text: @tr("Étude : {} · {} · prix actuel : {} · H/B : {} · valeur relative : {}",
                                 root.study-words(row), root.zone-words(row.zone), root.or-dash(row.price), root.or-dash(row.ud), root.or-dash(row.relative));
                         }
                         if row.study == "none" && row.other-currency != "": StatusBand {
@@ -290,7 +290,7 @@ export component ReviewScreen inherits Rectangle {
                         }
                         if row.other-high-zone != "": StatusBand {
                             icon: "◦";
-                            text: @tr("Autre étude de ce titre dans la zone haute ou au-dessus : {}", row.other-high-zone);
+                            text: @tr("Autre étude de ce titre dans la {} ou au-dessus : {}", Labels.zone-sell.to-lowercase(), row.other-high-zone);
                         }
                         // A stop that cannot be compared with a price says why (absence honesty):
                         // a lot without a declared currency, a lot whose study could not be read.
@@ -320,7 +320,7 @@ export component ReviewScreen inherits Rectangle {
                             // The review's own words, as in its PDF and its counts (« seuil suiveur »,
                             // « zone haute ») — G1 final review.
                             if row.trigger == "stop": CaptionLine { text: @tr("◆ Le prix a atteint le seuil suiveur."); }
-                            if row.trigger == "sell": CaptionLine { text: @tr("◆ Le prix est dans la zone haute."); }
+                            if row.trigger == "sell": CaptionLine { text: @tr("◆ Le prix est dans la {}.", Labels.zone-sell.to-lowercase()); }
                             if row.linked || row.study == "not_computable": CaptionLine {
                                 text: row.last-saved-unknown ? @tr("dernière sauvegarde : inconnue (historique indisponible)") : @tr("dernière sauvegarde : {}", row.last-saved);
                             }
@@ -361,7 +361,7 @@ export component ReviewScreen inherits Rectangle {
                 FactLine { text: @tr("{} positions · {} avec une étude · {} dont l'étude a toutes ses données validées et à jour · {} dont l'étude est provisoire (données à revérifier ou confiance réduite) · {} dont l'étude attend une donnée requise · {} dont l'étude n'est pas calculable", Review.count-positions, Review.count-linked, Review.count-full, Review.count-provisional, Review.count-withheld, Review.count-not-computable); }
                 // Positions, as their rows show them (G3 review); the due count counts STUDIES —
                 // on its own line, never read as positions.
-                FactLine { text: @tr("{} avec au moins un signal · {} dans la zone haute ou au-dessus · {} sous leur seuil suiveur", Review.count-flagged, Review.count-high-zone, Review.count-stop-breached); }
+                FactLine { text: @tr("{} avec au moins un signal · {} dans la {} ou au-dessus · {} sous leur seuil suiveur", Review.count-flagged, Review.count-high-zone, Labels.zone-sell.to-lowercase(), Review.count-stop-breached); }
                 FactLine { text: @tr("{} études à revoir", Review.count-due); }
             }
         }
