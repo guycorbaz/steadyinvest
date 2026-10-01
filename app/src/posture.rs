@@ -1007,7 +1007,9 @@ mod tests {
             // outcome, its undo and the not-full refusal (MSG_FREEZE_*): 248 + 3 = 251, measured.
             // Year validation (Guy's on-screen test, 2026-09-30): validated, some left out,
             // nothing to validate (MSG_YEAR_*): 251 + 3 = 254, measured.
-            254,
+            // An unknown symbol's hint (Guy's on-screen test, 2026-10-01: SAP.DE → SAP.XETRA):
+            // MSG_TICKER_CONVENTION, MSG_TICKER_SUGGESTION: 254 + 2 = 256, measured.
+            256,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured. The G1 final review of the study PDF export

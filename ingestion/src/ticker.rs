@@ -46,6 +46,25 @@ pub fn known_venue(ticker: &str) -> Option<String> {
         .then(|| suffix.to_ascii_uppercase())
 }
 
+/// PURE: the app's spelling of a symbol written in another common convention (Guy's on-screen
+/// test, 2026-10-01: SAP.DE fetched nothing) — only unambiguous venue suffixes: Yahoo's `.DE`
+/// (Xetra) is EODHD's `.XETRA`, Yahoo's `.AX` (ASX) EODHD's `.AU`. Every target is a venue of
+/// [`venue_mic`] (tested). `None` for any other symbol — never a guess.
+pub fn convention_suggestion(ticker: &str) -> Option<String> {
+    let (base, suffix) = ticker.trim().rsplit_once('.')?;
+    if base.is_empty() {
+        return None;
+    }
+    let venue = CONVENTION_SUGGESTIONS
+        .iter()
+        .find(|(foreign, _)| suffix.eq_ignore_ascii_case(foreign))
+        .map(|(_, ours)| *ours)?;
+    Some(format!("{}.{venue}", base.to_ascii_uppercase()))
+}
+
+/// Foreign suffix → the app's (EODHD's) venue suffix, for [`convention_suggestion`].
+const CONVENTION_SUGGESTIONS: [(&str, &str); 2] = [("DE", "XETRA"), ("AX", "AU")];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -67,5 +86,21 @@ mod tests {
         assert_eq!(known_venue("NESN.XX"), None); // unmapped: absent, never a guess
         assert_eq!(known_venue("NESN"), None);
         assert_eq!(known_venue(".SW"), None);
+    }
+
+    #[test]
+    fn a_foreign_suffix_suggests_a_known_venue_and_nothing_else_is_guessed() {
+        assert_eq!(
+            convention_suggestion("sap.de").as_deref(),
+            Some("SAP.XETRA")
+        );
+        assert_eq!(convention_suggestion(" BHP.AX ").as_deref(), Some("BHP.AU"));
+        assert_eq!(convention_suggestion("NESN.SW"), None);
+        assert_eq!(convention_suggestion(".DE"), None);
+        assert_eq!(convention_suggestion("SAP"), None);
+        for (foreign, ours) in CONVENTION_SUGGESTIONS {
+            assert!(venue_mic(ours).is_some(), "{ours} is a pinned venue");
+            assert!(venue_mic(foreign).is_none(), "{foreign} is not ours");
+        }
     }
 }

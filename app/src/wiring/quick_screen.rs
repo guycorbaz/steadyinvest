@@ -447,9 +447,14 @@ pub(crate) fn on_fetched(
     );
     // The result, or the failure's own cause.
     let result = match outcome.result {
-        Ok(fetched) if !has_analysis_years(&fetched) => Err(state::MSG_PROVIDER_NO_DATA),
+        // Guy's on-screen test (2026-10-01): an unknown symbol names the convention / a suggestion,
+        // from the symbol asked for (never from the last error of a provider chain).
+        Ok(fetched) if !has_analysis_years(&fetched) => Err(state::no_data_notice(&outcome.ticker)),
         Ok(fetched) => Ok(fetched),
-        Err(error) => Err(state::provider_failure_notice(&error)),
+        Err(error) => Err(state::provider_failure_notice_with_hint(
+            &error,
+            &outcome.ticker,
+        )),
     };
     match (landing(now, result.is_ok()), result) {
         (Landing::Show, Ok(fetched)) => {
@@ -478,15 +483,15 @@ pub(crate) fn on_fetched(
         (Landing::Keep, Err(message)) => {
             tracing::info!(ticker = %outcome.ticker, "quick screen failure kept for the list");
             let ticker = outcome.ticker.to_uppercase();
-            // A French notice (`provider_failure_notice`), owned — never an error's Display.
-            let message = message.to_owned();
+            // A French notice (`provider_failure_notice_with_hint`), owned — never an error's
+            // Display.
             update_kept(
                 ui,
                 kept,
                 KeptEvent::Kept(KeptExamination::Failure { ticker, message }),
             );
         }
-        (_, Err(message)) => crate::wiring::dialog::refuse(ui, message),
+        (_, Err(message)) => crate::wiring::dialog::refuse(ui, &message),
         // `landing` never refuses a result.
         (Landing::Refuse, Ok(_)) => {}
     }

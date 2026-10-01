@@ -271,6 +271,12 @@ pub const MSG_FETCH_WORKER_GONE: &str = "le service de récupération est indisp
 pub const MSG_PROVIDER_OFFLINE: &str = "La connexion au fournisseur a échoué ; les dernières données connues restent affichées (à actualiser).";
 pub const MSG_PROVIDER_QUOTA: &str = "Le fournisseur a signalé une limite d'usage ; les dernières données connues restent affichées, réessayez plus tard.";
 pub const MSG_PROVIDER_NO_DATA: &str = "Le fournisseur n'a renvoyé aucune donnée pour ce symbole ; les dernières données connues restent affichées.";
+/// Guy's on-screen test (2026-10-01): SAP.DE fetched nothing and nothing said why — `.DE` is the
+/// Yahoo convention, the app's (EODHD's) is `.XETRA`. An unknown symbol now names the convention…
+pub const MSG_TICKER_CONVENTION: &str = "Le symbole s'écrit SYMBOLE.PLACE selon la convention de l'application (p. ex. NESN.SW, SAP.XETRA, NVDA.US).";
+/// …and, for a suffix of another common convention, the app's spelling of the same listing.
+pub const MSG_TICKER_SUGGESTION: &str =
+    "Dans la convention de l'application, {ticker} s'écrit {suggestion}.";
 /// G1 H (#237, owner decision 10): the share-split history could not be read, so the fetch is
 /// refused whole (no price at a wrong scale) — named apart from the fundamentals / prices
 /// failures. The plan-excludes-it (403) and usage-limit (429) causes keep their own wording; any
@@ -1027,6 +1033,74 @@ pub fn provider_failure_notice(error: &steadyinvest_ingestion::IngestionError) -
     }
 }
 
+/// The symbol hint (Guy's on-screen test 2026-10-01; G3 review: from the symbol's SHAPE, never
+/// from the last error of a provider chain): the app's spelling for a known foreign suffix, else
+/// the SYMBOLE.PLACE convention for a symbol without a known venue; `None` for a well-formed one.
+pub fn ticker_hint(ticker: &str) -> Option<String> {
+    if let Some(suggestion) = steadyinvest_ingestion::ticker::convention_suggestion(ticker) {
+        return Some(
+            MSG_TICKER_SUGGESTION
+                .replace("{ticker}", &ticker.trim().to_ascii_uppercase())
+                .replace("{suggestion}", &suggestion),
+        );
+    }
+    steadyinvest_ingestion::ticker::known_venue(ticker)
+        .is_none()
+        .then(|| MSG_TICKER_CONVENTION.to_string())
+}
+
+/// `base` + the [`ticker_hint`] of `ticker`, when there is one.
+fn with_hint(base: &str, ticker: &str) -> String {
+    match ticker_hint(ticker) {
+        Some(hint) => format!("{base} {hint}"),
+        None => base.to_string(),
+    }
+}
+
+/// `base` + the app's spelling of `ticker` when it uses a known foreign suffix — the form that
+/// names the symbol, for a banner shared by several symbols (the holdings price refresh).
+pub fn with_suggestion(base: &str, ticker: &str) -> String {
+    match steadyinvest_ingestion::ticker::convention_suggestion(ticker) {
+        Some(suggestion) => format!(
+            "{base} {}",
+            MSG_TICKER_SUGGESTION
+                .replace("{ticker}", &ticker.trim().to_ascii_uppercase())
+                .replace("{suggestion}", &suggestion)
+        ),
+        None => base.to_string(),
+    }
+}
+
+/// A fetch that brought no usable data for `ticker`: the no-data notice with its symbol hint.
+pub fn no_data_notice(ticker: &str) -> String {
+    with_hint(MSG_PROVIDER_NO_DATA, ticker)
+}
+
+/// The failure notice of a fetch of `ticker`, with the symbol hint when the failure is about the
+/// data (unknown symbol, unreadable payload — a mistyped venue on a fallback provider reads as
+/// either), never on an outage, a quota or a key refusal. Every other notice is unchanged.
+pub fn provider_failure_notice_with_hint(
+    error: &steadyinvest_ingestion::IngestionError,
+    ticker: &str,
+) -> String {
+    use steadyinvest_ingestion::{IngestionError, ProviderError};
+    let base = provider_failure_notice(error);
+    let about_the_data = match error {
+        IngestionError::Provider(p) => matches!(
+            p.root_cause(),
+            ProviderError::TickerNotFound { .. }
+                | ProviderError::Parse { .. }
+                | ProviderError::Unsupported { .. }
+        ),
+        IngestionError::Normalize(_) => true,
+    };
+    if about_the_data {
+        with_hint(base, ticker)
+    } else {
+        base.to_string()
+    }
+}
+
 /// PURE: the key test's verdict (Story 3.2) for Réglages — a statement about the KEY, cause-named.
 /// Issue #42: a quota proves acceptance, a network cut is inconclusive; a 403 is a valid key on a
 /// plan that does not cover the data. G1 H review: a failure of EODHD's `/splits` (reached only
@@ -1247,6 +1321,8 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_PROVIDER_OFFLINE,
     MSG_PROVIDER_QUOTA,
     MSG_PROVIDER_NO_DATA,
+    MSG_TICKER_CONVENTION,
+    MSG_TICKER_SUGGESTION,
     MSG_REFRESH_NOCHANGE,
     MSG_REFRESH_PRICE,
     MSG_REFRESH_INPUT,
@@ -1443,6 +1519,64 @@ mod flag_tests {
                 label.split(' ').any(|w| w == n(threshold)),
                 "{key:?}: « {label} » does not name {}",
                 n(threshold)
+            );
+        }
+    }
+
+    // Guy's on-screen test (2026-10-01): SAP.DE fetched nothing and nothing said why.
+    #[test]
+    fn an_unknown_symbol_names_the_convention_or_its_spelling() {
+        use steadyinvest_ingestion::{IngestionError, ProviderError};
+        let not_found = |t: &str| {
+            IngestionError::Provider(ProviderError::TickerNotFound {
+                ticker: t.to_string(),
+            })
+        };
+        assert_eq!(
+            provider_failure_notice_with_hint(&not_found("sap.de"), "sap.de"),
+            format!(
+                "{MSG_PROVIDER_NO_DATA} Dans la convention de l'application, SAP.DE s'écrit SAP.XETRA."
+            )
+        );
+        assert_eq!(
+            provider_failure_notice_with_hint(&not_found("NESN.XX"), "NESN.XX"),
+            format!("{MSG_PROVIDER_NO_DATA} {MSG_TICKER_CONVENTION}")
+        );
+        // A well-formed symbol the provider does not know (delisted, off-plan): no lecture.
+        assert_eq!(
+            provider_failure_notice_with_hint(&not_found("NESN.SW"), "NESN.SW"),
+            MSG_PROVIDER_NO_DATA
+        );
+        // The no-usable-years path carries the same hint.
+        assert_eq!(
+            no_data_notice("SAP.DE"),
+            format!(
+                "{MSG_PROVIDER_NO_DATA} Dans la convention de l'application, SAP.DE s'écrit SAP.XETRA."
+            )
+        );
+        assert_eq!(no_data_notice("NVDA.US"), MSG_PROVIDER_NO_DATA);
+        // An unreadable payload (a fallback provider's 400 on a mistyped venue) carries it too.
+        let parse = IngestionError::Provider(ProviderError::Parse {
+            detail: "x".to_string(),
+        });
+        assert!(provider_failure_notice_with_hint(&parse, "SAP.DE").ends_with("SAP.XETRA."));
+        // Outages, quotas and key refusals read exactly as before, whatever the symbol.
+        for error in [
+            ProviderError::Network {
+                detail: "x".to_string(),
+            },
+            ProviderError::Quota {
+                retry_after_secs: None,
+            },
+            ProviderError::InvalidOrAbsentKey,
+            ProviderError::Forbidden {
+                detail: "x".to_string(),
+            },
+        ] {
+            let error = IngestionError::Provider(error);
+            assert_eq!(
+                provider_failure_notice_with_hint(&error, "SAP.DE"),
+                provider_failure_notice(&error),
             );
         }
     }
