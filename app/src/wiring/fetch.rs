@@ -374,7 +374,7 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                             // Issue #101: if a configured fallback was skipped for a missing key, the
                             // failover the user set up never ran — name it so the outright failure is
                             // not a mystery ("I configured a backup, why did it just fail?").
-                            let mut notice = state::provider_failure_notice(&error).to_string();
+                            let mut notice = state::provider_failure_notice_with_hint(&error);
                             if let Some(fallback) = configured_fallback_missing_key(
                                 &config.borrow(),
                                 steadyinvest_ingestion::FieldKind::Fundamentals,

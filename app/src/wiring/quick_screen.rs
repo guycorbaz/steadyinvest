@@ -447,9 +447,12 @@ pub(crate) fn on_fetched(
     );
     // The result, or the failure's own cause.
     let result = match outcome.result {
-        Ok(fetched) if !has_analysis_years(&fetched) => Err(state::MSG_PROVIDER_NO_DATA),
+        Ok(fetched) if !has_analysis_years(&fetched) => {
+            Err(state::MSG_PROVIDER_NO_DATA.to_string())
+        }
         Ok(fetched) => Ok(fetched),
-        Err(error) => Err(state::provider_failure_notice(&error)),
+        // Guy's on-screen test (2026-10-01): an unknown symbol names the convention / a suggestion.
+        Err(error) => Err(state::provider_failure_notice_with_hint(&error)),
     };
     match (landing(now, result.is_ok()), result) {
         (Landing::Show, Ok(fetched)) => {
@@ -486,7 +489,7 @@ pub(crate) fn on_fetched(
                 KeptEvent::Kept(KeptExamination::Failure { ticker, message }),
             );
         }
-        (_, Err(message)) => crate::wiring::dialog::refuse(ui, message),
+        (_, Err(message)) => crate::wiring::dialog::refuse(ui, &message),
         // `landing` never refuses a result.
         (Landing::Refuse, Ok(_)) => {}
     }
