@@ -19,7 +19,9 @@ export component ButtonFace inherits Rectangle {
     in property <color> sunk-fill: Tokens.relief-pressed;
     in property <color> edge: Tokens.relief-edge;
 
-    property <bool> down: root.enabled && (root.pressed || root.sunk);
+    // A selected toggle stays sunk even disabled (G3 review: the demo's chosen option must still
+    // read as chosen); a press needs an enabled face.
+    property <bool> down: root.sunk || (root.enabled && root.pressed);
     property <bool> raised: root.enabled && !root.down;
 
     background: transparent;

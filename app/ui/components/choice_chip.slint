@@ -43,6 +43,7 @@ export component ChoiceChip inherits Rectangle {
     }
 
     fs := FocusScope {
+        enabled: root.enabled; // a disabled chip is no Tab stop (as ActionButton)
         key-pressed(event) => {
             if (event.text == Key.Return || event.text == " ") {
                 if (!root.enabled) { return accept; }
@@ -56,7 +57,7 @@ export component ChoiceChip inherits Rectangle {
     }
 
     touch := TouchArea {
-        mouse-cursor: pointer;
+        mouse-cursor: root.enabled ? pointer : default;
         clicked => {
             if (!root.enabled) { return; }
             fs.focus();

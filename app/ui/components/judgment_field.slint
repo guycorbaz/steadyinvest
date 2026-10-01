@@ -144,7 +144,8 @@ export component JudgmentField inherits VerticalLayout {
     // The « hist. » proposal chip — visible only while the field is EMPTY and a historical value
     // exists. One click commits the proposal through the SAME `set-judgment` path as typing (the
     // gesture is the judgment); the chip disappears with the commit (the field is no longer empty).
-    if root.value == "" && root.suggestion != "": chip := Rectangle {
+    // Never on the read-only demo (G3 review: a click there changed nothing, silently).
+    if root.value == "" && root.suggestion != "" && !Studies.demo-active: chip := Rectangle {
         width: 140px;
         height: Tokens.row-height * 0.8;
         border-radius: Tokens.radius;
