@@ -10651,3 +10651,141 @@ mod frozen_8_8 {
         }
     }
 }
+
+// ── Guy's on-screen test (2026-09-30) — validate a whole year in one gesture ──
+mod validate_year {
+    use super::*;
+
+    const NOW: &str = "2026-09-30T10:00:00Z";
+    const YEARS: [i32; 5] = [2020, 2021, 2022, 2023, 2024];
+
+    fn fetched_state(dir: &TempDir) -> (JournalState, Uuid) {
+        let mut state = undo_state(dir, 0x7A, NOW);
+        let id = state.create_study("NESN", "CHF").unwrap();
+        state
+            .apply_provider_refresh(id, &fetched_for(&YEARS))
+            .unwrap();
+        state.reset_undo_for(id);
+        (state, id)
+    }
+
+    fn reviews(state: &JournalState, id: Uuid, y: usize) -> Vec<(String, Review)> {
+        let study = state.get_study(id).unwrap();
+        entry::ALL_FIELDS
+            .iter()
+            .filter_map(|f| {
+                entry::get_cell(&study.years[y], f)
+                    .filter(|c| c.value.is_some())
+                    .map(|c| (f.to_string(), c.review))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn every_filled_cell_of_the_year_is_validated_in_one_undoable_step() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = fetched_state(&dir);
+        let (year, validated, left) = state.validate_year(id, 2).unwrap();
+        assert_eq!((year, left), (2022, 0));
+        assert_eq!(validated, 4, "sales, EPS, high, low — the filled cells");
+        assert!(
+            reviews(&state, id, 2)
+                .iter()
+                .all(|(_, r)| *r == Review::Validated)
+        );
+        assert!(
+            reviews(&state, id, 1)
+                .iter()
+                .all(|(_, r)| *r != Review::Validated),
+            "the other years are untouched"
+        );
+        assert_eq!(
+            state_year_validated_message(year, validated, left),
+            "4 cellule(s) de 2022 validée(s)."
+        );
+        // Again: nothing left to validate — named, no write, no undo step.
+        assert_eq!(state.validate_year(id, 2).unwrap(), (2022, 0, 0));
+        assert_eq!(
+            state_year_validated_message(2022, 0, 0),
+            "Aucune cellule à valider en 2022."
+        );
+        // One Ctrl+Z reverts the whole year.
+        state.undo(id).unwrap();
+        assert!(
+            reviews(&state, id, 2)
+                .iter()
+                .all(|(_, r)| *r != Review::Validated)
+        );
+    }
+
+    #[test]
+    fn validating_every_year_reaches_a_full_verdict() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = fetched_state(&dir);
+        for (field, v) in [
+            ("est_high_eps", 8),
+            ("est_low_eps", 6),
+            ("high_pe", 20),
+            ("low_pe", 10),
+            ("current_price", 60),
+        ] {
+            state
+                .set_judgment_field(id, field, Some(und_money(v)))
+                .unwrap();
+        }
+        for y in 0..YEARS.len() {
+            state.validate_year(id, y).unwrap();
+        }
+        let study = state.get_study(id).unwrap();
+        let snapshot = engine::build_snapshot(&study).expect("normalizes");
+        assert!(
+            matches!(
+                snapshot.verdict(),
+                steadyinvest_core::verdict::Verdict::Full(_)
+            ),
+            "five year-gestures instead of forty cell gestures"
+        );
+    }
+
+    #[test]
+    fn a_pending_provider_divergence_is_left_out_and_counted() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = fetched_state(&dir);
+        state.validate_year(id, 0).unwrap();
+        // A divergent refresh parks the provider value as pending on the ✓ cells (#110); the owner
+        // then lifts the year's validations (✓ → ?), the divergence still to settle.
+        state
+            .apply_provider_refresh(id, &fetched_custom(&YEARS, 1000, 5, 999, 50, "diverge"))
+            .unwrap();
+        state.unlock_all(id, &UnlockScope::Year(0)).unwrap();
+        let (year, validated, left) = state.validate_year(id, 0).unwrap();
+        assert_eq!((year, validated, left), (2020, 3, 1));
+        let high = &state.get_study(id).unwrap().years[0].high_price;
+        assert_ne!(
+            high.review,
+            Review::Validated,
+            "the divergence is not settled in bulk"
+        );
+        assert!(high.pending.is_some());
+        assert_eq!(
+            state_year_validated_message(year, validated, left),
+            "3 cellule(s) de 2020 validée(s) ; 1 laissée(s) de côté : une valeur du fournisseur \
+             diffère, à trancher cellule par cellule."
+        );
+    }
+
+    #[test]
+    fn a_missing_study_or_year_is_refused_by_name() {
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = fetched_state(&dir);
+        assert_eq!(
+            state.validate_year(Uuid::from_u128(0xDEAD), 0),
+            Err(MSG_STUDY_GONE.to_string())
+        );
+        assert!(state.validate_year(id, 99).is_err());
+    }
+
+    fn state_year_validated_message(year: i32, validated: usize, left: usize) -> String {
+        crate::state::year_validated_message(year, validated, left)
+    }
+}

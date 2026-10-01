@@ -16,7 +16,8 @@ use uuid::Uuid;
 use crate::viewmodel::entry;
 
 use super::{
-    JournalState, MSG_NO_JOURNAL, MSG_SAVE_FAILED, MSG_SOFT_LOCKED, MSG_YEARS_MAX, save_error,
+    JournalState, MSG_NO_JOURNAL, MSG_SAVE_FAILED, MSG_SOFT_LOCKED, MSG_STUDY_GONE, MSG_YEARS_MAX,
+    save_error,
 };
 
 /// One line of a pasted column (G1 I review): a value to write (`None` = a blank line, an empty
@@ -255,6 +256,68 @@ impl JournalState {
                     self.history.record(before);
                 }
                 Ok(flipped)
+            }
+            Err(error) => Err(save_error(error)),
+        }
+    }
+
+    /// Validate (`✓`) every filled cell of one year in one gesture (Guy, 2026-09-30: « une
+    /// validation par année » — a full verdict otherwise needs two gestures per cell). One upsert,
+    /// one undo step, the FR51 snapshot. Skipped: a value-less cell (#47: never `✓` on nothing), an
+    /// already-validated one, and one with a pending provider divergence — validating settles it
+    /// (Story 3.4 AC4), a decision a bulk gesture must not take silently; those are counted and
+    /// named. Returns `(year, validated, left)`.
+    pub fn validate_year(
+        &mut self,
+        study_id: Uuid,
+        year_index: usize,
+    ) -> Result<(i32, usize, usize), String> {
+        self.refuse_if_read_only()?;
+        if self.journal.is_none() {
+            return Err(MSG_NO_JOURNAL.to_string());
+        }
+        let mut study = self
+            .get_study(study_id)
+            .ok_or_else(|| MSG_STUDY_GONE.to_string())?;
+        let before = study.clone(); // pre-mutation snapshot for undo (Story 2.9)
+        let Some(year) = study.years.get_mut(year_index) else {
+            return Err(MSG_SAVE_FAILED.to_string());
+        };
+        let year_label = year.year;
+        let (mut validated, mut left) = (0usize, 0usize);
+        for field in entry::ALL_FIELDS {
+            let Some(cell) = entry::get_cell(year, field) else {
+                continue; // an absent optional column carries nothing to sign off
+            };
+            if cell.value.is_none() || cell.review == Review::Validated {
+                continue;
+            }
+            if cell.pending.is_some() {
+                left += 1;
+                continue;
+            }
+            let signed = Cell {
+                review: Review::Validated,
+                ..cell
+            };
+            entry::set_cell(year, field, signed).map_err(|()| MSG_SAVE_FAILED.to_string())?;
+            validated += 1;
+        }
+        if validated == 0 {
+            return Ok((year_label, 0, left)); // nothing written, no undo step
+        }
+        let now = self.clock.now();
+        let result = {
+            let journal = self
+                .journal
+                .as_mut()
+                .expect("journal presence checked above");
+            journal.put_study_with_history(&study, &now)
+        };
+        match result {
+            Ok(()) => {
+                self.history.record(before);
+                Ok((year_label, validated, left))
             }
             Err(error) => Err(save_error(error)),
         }

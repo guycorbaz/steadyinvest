@@ -222,6 +222,15 @@ pub const MSG_YEARS_MAX: &str =
 pub const MSG_UNLOCK_CONFIRM: &str = "Cette action retire la validation de {n} cellule(s).";
 /// The neutral notice after an "unlock all" completes — `{n}` is the count actually flipped.
 pub const MSG_UNLOCK_DONE: &str = "Validation retirée de {n} cellule(s).";
+/// Guy's on-screen test (2026-09-30): « Valider » a whole year — the outcome notice. `{n}` is the
+/// count of cells actually validated, `{y}` the year.
+pub const MSG_YEAR_VALIDATED: &str = "{n} cellule(s) de {y} validée(s).";
+/// The same, when some cells were left out: validating settles a pending provider divergence
+/// (Story 3.4), which a bulk gesture must never do silently. `{m}` is the count left out.
+pub const MSG_YEAR_VALIDATED_SOME_LEFT: &str = "{n} cellule(s) de {y} validée(s) ; {m} laissée(s) de côté : une valeur du fournisseur diffère, à trancher cellule par cellule.";
+/// Nothing to validate in the year (every filled cell already ✓, or none filled) — named, never a
+/// silent no-op.
+pub const MSG_YEAR_NOTHING_TO_VALIDATE: &str = "Aucune cellule à valider en {y}.";
 /// The engine could not normalize the study's data (a structural input error — duplicate year /
 /// invalid split): the verdict is suspended, never computed from broken inputs (Story 2.6).
 pub const MSG_NORMALIZE_FAILED: &str =
@@ -886,6 +895,19 @@ pub fn unlock_done_message(count: usize) -> String {
     MSG_UNLOCK_DONE.replace("{n}", &count.to_string())
 }
 
+/// The outcome notice of a year validation (`validated` cells, `left` with a pending divergence).
+pub fn year_validated_message(year: i32, validated: usize, left: usize) -> String {
+    let template = match (validated, left) {
+        (0, 0) => MSG_YEAR_NOTHING_TO_VALIDATE,
+        (_, 0) => MSG_YEAR_VALIDATED,
+        _ => MSG_YEAR_VALIDATED_SOME_LEFT,
+    };
+    template
+        .replace("{n}", &validated.to_string())
+        .replace("{m}", &left.to_string())
+        .replace("{y}", &year.to_string())
+}
+
 /// The confirm prompt for a dashboard lifecycle action on the study `ticker` (Story 2.12) — a `{t}`
 /// substitution of the matching `MSG_*_CONFIRM` const so the scanned template and the runtime string
 /// stay one source. `action` is the Slint wire string (`"archive"`/`"unarchive"`/`"delete"`); an
@@ -1204,6 +1226,9 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_YEARS_MAX,
     MSG_UNLOCK_CONFIRM,
     MSG_UNLOCK_DONE,
+    MSG_YEAR_VALIDATED,
+    MSG_YEAR_VALIDATED_SOME_LEFT,
+    MSG_YEAR_NOTHING_TO_VALIDATE,
     MSG_NORMALIZE_FAILED,
     MSG_ARCHIVE_CONFIRM,
     MSG_UNARCHIVE_CONFIRM,

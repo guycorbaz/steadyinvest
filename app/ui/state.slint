@@ -777,6 +777,9 @@ export global Studies {
     // scope-arg = year index as string / field key / "" for study). Confirm performs the flip; cancel
     // mutates nothing.
     callback request-unlock(string, string); // scope-kind, scope-arg
+    // « Valider » a whole year (Guy's on-screen test, 2026-09-30): every filled cell of the year
+    // index → ✓ in one gesture, one undo step (no confirm — Ctrl+Z reverts it).
+    callback validate-year(int);
     callback confirm-unlock();
     callback cancel-unlock();
     // A value edit was attempted on a soft-locked (`✓`) cell — Rust raises the neutral notice (the
