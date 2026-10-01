@@ -1059,10 +1059,21 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
             match viewmodel::verify::demo_study() {
                 Ok(study) => {
                     // The demo has no persisted view-state or undo history of its own: render it with
-                    // the default (entry regime, all sections open) and an empty undo stack, so it never
-                    // inherits the previously-open study's folds/regime or shows enabled undo/redo.
-                    journal_state.borrow_mut().reset_undo();
+                    // the default (entry regime, all sections open); undo / redo are disabled on it
+                    // (the buttons; the rails need a `current_study`). G3 review (2026-10-01): the
+                    // history PARKED for the study just closed is kept — no `reset_undo()` here, or
+                    // a visit to the demo would cost the owner his undo on reopening the study.
                     study_notice::reset(&ui); // G1 J: the demo inherits no study's notice
+                    // G3 review: nor the focused cell's facts (« Source », a pending divergence with
+                    // its accept / keep buttons) nor a pending unlock confirmation of the last study.
+                    studies.set_active_year(-1);
+                    studies.set_active_field(SharedString::new());
+                    studies.set_active_source(SharedString::new());
+                    studies.set_active_timestamp(SharedString::new());
+                    studies.set_active_pending(SharedString::new());
+                    studies.set_active_draft_validated(SharedString::new());
+                    studies.set_active_warning(SharedString::new());
+                    studies.set_confirm_visible(false);
                     // G1 final review M3: …nor a study's traceability panel or scenario comparison.
                     reset_study_overlays(&ui, &compare_study);
                     // G1 J review: `current_study` is None HERE, by construction — not merely

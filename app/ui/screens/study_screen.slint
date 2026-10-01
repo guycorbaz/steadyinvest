@@ -580,12 +580,12 @@ export component StudyScreen inherits Rectangle {
                 // Story 2.9 — undo/redo of any judgment or grid edit (also Ctrl+Z / Ctrl+Y below).
                 ActionButton {
                     label: @tr("↶ Annuler");
-                    enabled: Studies.can-undo;
+                    enabled: Studies.can-undo && !Studies.demo-active;
                     clicked => { Studies.undo(); }
                 }
                 ActionButton {
                     label: @tr("↷ Rétablir");
-                    enabled: Studies.can-redo;
+                    enabled: Studies.can-redo && !Studies.demo-active;
                     clicked => { Studies.redo(); }
                 }
                 // Story 2.9 — open the scenario-compare overlay (current vs one alternate placement).
@@ -850,6 +850,8 @@ export component StudyScreen inherits Rectangle {
                 // provenance line never widens the form past the window.
                 Text {
                     text: @tr("Ctrl+V : coller une colonne · Ctrl+Espace : marquer non disponible · Ctrl+Entrée : à revoir / validé");
+                    // G3 review: no writing gesture to hint on the read-only demo.
+                    visible: !Studies.demo-active;
                     color: Tokens.text-low;
                     font-size: Tokens.font-caption;
                     vertical-alignment: center;
@@ -917,6 +919,7 @@ export component StudyScreen inherits Rectangle {
                         alignment: start;
                         for yh[i] in Studies.year-headers: ActionButton {
                             label: yh;
+                            enabled: !Studies.demo-active; // the demo is read-only
                             clicked => { Studies.validate-year(i); }
                         }
                     }
@@ -932,10 +935,12 @@ export component StudyScreen inherits Rectangle {
                         alignment: start;
                         ActionButton {
                             label: @tr("Toute l'étude");
+                            enabled: !Studies.demo-active;
                             clicked => { Studies.request-unlock("study", ""); }
                         }
                         for yh[i] in Studies.year-headers: ActionButton {
                             label: yh;
+                            enabled: !Studies.demo-active;
                             clicked => { Studies.request-unlock("year", "\{i}"); }
                         }
                     }
@@ -945,30 +950,37 @@ export component StudyScreen inherits Rectangle {
                         alignment: start;
                         ActionButton {
                             label: @tr("Haut");
+                            enabled: !Studies.demo-active;
                             clicked => { Studies.request-unlock("metric", "a"); }
                         }
                         ActionButton {
                             label: @tr("Bas");
+                            enabled: !Studies.demo-active;
                             clicked => { Studies.request-unlock("metric", "b"); }
                         }
                         ActionButton {
                             label: @tr("BPA");
+                            enabled: !Studies.demo-active;
                             clicked => { Studies.request-unlock("metric", "c"); }
                         }
                         ActionButton {
                             label: @tr("Div./action");
+                            enabled: !Studies.demo-active;
                             clicked => { Studies.request-unlock("metric", "f"); }
                         }
                         ActionButton {
                             label: @tr("Ventes");
+                            enabled: !Studies.demo-active;
                             clicked => { Studies.request-unlock("metric", "sales"); }
                         }
                         ActionButton {
                             label: @tr("Bénéfice avant impôt");
+                            enabled: !Studies.demo-active;
                             clicked => { Studies.request-unlock("metric", "pretax"); }
                         }
                         ActionButton {
                             label: @tr("Valeur comptable / action");
+                            enabled: !Studies.demo-active;
                             clicked => { Studies.request-unlock("metric", "book"); }
                         }
                     }
