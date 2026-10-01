@@ -901,7 +901,8 @@ export component SettingsScreen inherits Rectangle {
                 title: @tr("Glossaire");
 
                 GlossaryRow {
-                    term: @tr("Zone d'achat");
+                    // FR63: the active label set's noun (« Zone d'achat » / « Zone basse »).
+                    term: Labels.zone-buy;
                     definition: @tr("Le tiers bas de la fourchette de prix projetée.");
                 }
                 GlossaryRow {

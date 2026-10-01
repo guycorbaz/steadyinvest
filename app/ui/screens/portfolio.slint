@@ -211,9 +211,9 @@ export component PortfolioScreen inherits Rectangle {
                                 : candidate.data == "insufficient"
                                     ? @tr("{} — données insuffisantes", candidate.ticker)
                                     : candidate.in-buy-zone
-                                        ? @tr("{} — dans la zone d'achat", candidate.ticker)
+                                        ? @tr("{} — dans la {}", candidate.ticker, Labels.zone-buy.to-lowercase())
                                         : candidate.distance != ""
-                                            ? @tr("{} — à {} % au-dessus de la zone d'achat", candidate.ticker, candidate.distance)
+                                            ? @tr("{} — à {} % au-dessus de la {}", candidate.ticker, candidate.distance, Labels.zone-buy.to-lowercase())
                                             // A known zone without a statable distance (degenerate
                                             // band bottom) — the zone noun IS the fact. The key
                                             // comparisons stay OUTSIDE @tr (the register precedent).

@@ -794,8 +794,11 @@ mod tests {
         // 1147 + 25 = 1172, measured.
         // Year validation (Guy's on-screen test, 2026-09-30): the row's label « Valider une année
         // (cellules renseignées) » (the chips reuse the year headers): 1172 + 1 = 1173, measured.
+        // FR63 (Guy's on-screen test, 2026-10-01): the dashboard's three zone nouns and the
+        // glossary term now read the active label set (`Labels.zone-*`), not literals: 1173 − 4 =
+        // 1169, measured.
         assert!(
-            total >= 1173,
+            total >= 1169,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
