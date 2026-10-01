@@ -8,6 +8,8 @@ import { ButtonFace } from "button_face.slint";
 export component ChoiceChip inherits Rectangle {
     in property <string> label;
     in property <bool> selected;
+    // Disabled: flat, dimmed, no reaction (G3 review 2026-10-01 — the demo's dead chips).
+    in property <bool> enabled: true;
     callback activated();
 
     // Assistive-tech semantics (NFR-U discipline): a chip is a checkable button; the
@@ -16,7 +18,11 @@ export component ChoiceChip inherits Rectangle {
     accessible-label: root.label;
     accessible-checkable: true;
     accessible-checked: root.selected;
-    accessible-action-default => { root.activated(); }
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        if (root.enabled) { root.activated(); }
+    }
+    opacity: root.enabled ? 1.0 : 0.5;
 
     height: Tokens.row-height + Tokens.space-4;
     // The face wraps the label, so the chip states its own width (never narrower than its label).
@@ -37,8 +43,10 @@ export component ChoiceChip inherits Rectangle {
     }
 
     fs := FocusScope {
+        enabled: root.enabled; // a disabled chip is no Tab stop (as ActionButton)
         key-pressed(event) => {
             if (event.text == Key.Return || event.text == " ") {
+                if (!root.enabled) { return accept; }
                 root.flash = true;
                 flash-timer.running = true;
                 root.activated();
@@ -49,8 +57,9 @@ export component ChoiceChip inherits Rectangle {
     }
 
     touch := TouchArea {
-        mouse-cursor: pointer;
+        mouse-cursor: root.enabled ? pointer : default;
         clicked => {
+            if (!root.enabled) { return; }
             fs.focus();
             root.activated();
         }
@@ -61,6 +70,7 @@ export component ChoiceChip inherits Rectangle {
         height: 100%;
         pressed: touch.pressed || root.flash;
         sunk: root.selected;
+        enabled: root.enabled;
         focused: fs.has-focus;
         edge: root.selected ? Tokens.text-mid : Tokens.relief-edge;
 

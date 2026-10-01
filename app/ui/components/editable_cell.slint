@@ -258,7 +258,8 @@ export component EditableCell inherits Rectangle {
         vertical-alignment: center;
         single-line: true;
         // A validated cell is soft-locked: the value is read-only until the sign-off is cleared.
-        read-only: root.locked;
+        // The demo is read-only too (G3 review 2026-10-01: typing on it reverted without a word).
+        read-only: root.locked || Studies.demo-active;
         // Strictly between the leading and trailing markers (the marker-space rule above).
         width: max(0px, parent.width - root.lead - root.trail);
         height: 100%;
@@ -302,6 +303,12 @@ export component EditableCell inherits Rectangle {
             Studies.cell-move(root.state.year-index, root.state.field, "down"); // Enter advances down
         }
         key-pressed(e) => {
+            // G3 review: a read-only TextInput never fires `accepted` (Slint 1.17) — on the demo,
+            // Enter still advances down, as everywhere.
+            if (Studies.demo-active && e.text == Key.Return && !e.modifiers.control && !e.modifiers.meta) {
+                Studies.cell-move(root.state.year-index, root.state.field, "down");
+                return accept;
+            }
             // Ctrl/Cmd chords first, so they never leak a character into the cell (Spike-A fix).
             // Ctrl+Enter cycles the review tag none→?→✓→none (works regardless of the soft-lock —
             // it changes the TAG, not the value). Intercepted here so it never commits/advances.
@@ -374,7 +381,7 @@ export component EditableCell inherits Rectangle {
         review: root.state.review;
         reduced-motion: Studies.reduced-motion;
         clicked => {
-            root.cycle-review();
+            if (!Studies.demo-active) { root.cycle-review(); } // the read-only demo: no review tag
         }
     }
     // Calm lock affordance on a soft-locked cell — a glyph (NO colour spent), clickable to reach the

@@ -77,6 +77,7 @@ export component RationaleNote inherits VerticalLayout {
                 self.viewport-y = Math.max(Math.min(self.viewport-y, 0), Math.min(0, self.height - self.viewport-height));
             }
             input := TextInput {
+                read-only: Studies.demo-active; // the read-only demo (G3 review 2026-10-01)
                 color: Tokens.text-high;
                 selection-background-color: Tokens.focus;
                 font-family: Tokens.font-ui;

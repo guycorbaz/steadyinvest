@@ -289,6 +289,7 @@ component CompanyNameField inherits Rectangle {
         visible: input.text == "";
     }
     input := TextInput {
+        read-only: Studies.demo-active; // the read-only demo (G3 review 2026-10-01)
         color: Tokens.text-high;
         selection-background-color: Tokens.focus;
         font-family: Tokens.font-ui;
@@ -591,6 +592,8 @@ export component StudyScreen inherits Rectangle {
                 // Story 2.9 — open the scenario-compare overlay (current vs one alternate placement).
                 ActionButton {
                     label: @tr("⇄ Comparer");
+                    // It compares placements of the open study; the demo is no open study.
+                    enabled: !Studies.demo-active;
                     clicked => { Studies.open-compare(); }
                 }
                 // Story 3.1 — auto-fetch the open study's data from the provider (off-thread). Disabled
@@ -780,11 +783,13 @@ export component StudyScreen inherits Rectangle {
                     vertical-alignment: center;
                 }
                 ChoiceChip {
+                    enabled: !Studies.demo-active; // no effect on the read-only demo
                     label: @tr("Saisie");
                     selected: Studies.regime == "entry";
                     activated => { Studies.set-regime("entry"); }
                 }
                 ChoiceChip {
+                    enabled: !Studies.demo-active; // no effect on the read-only demo
                     label: @tr("Contemplation");
                     selected: Studies.regime == "contemplation";
                     activated => { Studies.set-regime("contemplation"); }
@@ -1273,7 +1278,7 @@ export component StudyScreen inherits Rectangle {
                         label: @tr("Ajouter une année");
                         // Disabled on a read-only journal — consistent with the undo/redo buttons; the
                         // Rust rail refuses anyway, but the affordance shouldn't invite a doomed click.
-                        enabled: !Studies.read-only;
+                        enabled: !Studies.read-only && !Studies.demo-active;
                         clicked => { Studies.extend-history(); }
                     }
                 }
@@ -1369,21 +1374,25 @@ export component StudyScreen inherits Rectangle {
                     spacing: Tokens.space-8;
                     alignment: start;
                     ChoiceChip {
+                        enabled: !Studies.demo-active; // no effect on the read-only demo
                         label: @tr("PER bas × BPA bas");
                         selected: Studies.judgment.forecast-low-option == "avg_low_pe_times_eps";
                         activated => { Studies.set-forecast-low-option("avg_low_pe_times_eps"); }
                     }
                     ChoiceChip {
+                        enabled: !Studies.demo-active; // no effect on the read-only demo
                         label: @tr("Prix bas moyen 5 ans");
                         selected: Studies.judgment.forecast-low-option == "avg_low_price_last_5y";
                         activated => { Studies.set-forecast-low-option("avg_low_price_last_5y"); }
                     }
                     ChoiceChip {
+                        enabled: !Studies.demo-active; // no effect on the read-only demo
                         label: @tr("Plus bas sévère récent");
                         selected: Studies.judgment.forecast-low-option == "recent_severe_low";
                         activated => { Studies.set-forecast-low-option("recent_severe_low"); }
                     }
                     ChoiceChip {
+                        enabled: !Studies.demo-active; // no effect on the read-only demo
                         label: @tr("Soutenu par dividende");
                         selected: Studies.judgment.forecast-low-option == "dividend_supported";
                         activated => { Studies.set-forecast-low-option("dividend_supported"); }
