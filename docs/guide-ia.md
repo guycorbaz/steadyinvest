@@ -208,7 +208,7 @@ Quelques demandes typiques, dans une session `claude` lancée depuis `~/steadyin
 - « Propose-moi trois études de sociétés suisses de croissance. »
 - « Qu'ai-je fait de tes propositions précédentes ? » (le Registre, `get_drafts_record`).
 
-L'IA voit les **signaux de qualité** du moteur (par exemple un PER haut jugé au-dessus de 20,
+L'IA voit les **signaux de qualité** du moteur, tels que l'écran les énonce (un seul signal de PER haut, le seuil le plus élevé) et avec l'indication `quality_flags_assessable` (une liste vide ne veut dire « aucun signal » que si elle vaut `true`) (par exemple un PER haut jugé au-dessus de 20,
 « agressif », ou de 25, « invraisemblable »). Dans l'application, ces signaux apparaissent sur
 l'écran d'étude (« Signaux de qualité », sous les chiffres clés) et dans son PDF, dans « Comparer des
 études » et dans la Revue du portefeuille.

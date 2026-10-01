@@ -435,13 +435,8 @@ pub const MSG_FLAG_RELATIVE_VALUE_HIGH: &str = "valeur relative à 100 % ou plus
 pub fn shown_quality_flags(
     flags: &[steadyinvest_core::ssg::QualityFlagKey],
 ) -> Vec<steadyinvest_core::ssg::QualityFlagKey> {
-    use steadyinvest_core::ssg::QualityFlagKey as K;
-    let above_25 = flags.contains(&K::ProjectedHighPeImplausible);
-    flags
-        .iter()
-        .copied()
-        .filter(|k| !(above_25 && *k == K::ProjectedHighPeAggressive))
-        .collect()
+    // The rule lives in core since 2026-10-01, shared with the MCP server.
+    steadyinvest_core::ssg::shown_quality_flags(flags)
 }
 
 /// The neutral wording of one engine quality flag (Story 7.2).
