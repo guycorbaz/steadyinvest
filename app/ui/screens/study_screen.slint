@@ -917,6 +917,7 @@ export component StudyScreen inherits Rectangle {
                         alignment: start;
                         for yh[i] in Studies.year-headers: ActionButton {
                             label: yh;
+                            enabled: !Studies.demo-active; // the demo is read-only
                             clicked => { Studies.validate-year(i); }
                         }
                     }
@@ -932,10 +933,12 @@ export component StudyScreen inherits Rectangle {
                         alignment: start;
                         ActionButton {
                             label: @tr("Toute l'étude");
+                            enabled: !Studies.demo-active;
                             clicked => { Studies.request-unlock("study", ""); }
                         }
                         for yh[i] in Studies.year-headers: ActionButton {
                             label: yh;
+                            enabled: !Studies.demo-active;
                             clicked => { Studies.request-unlock("year", "\{i}"); }
                         }
                     }
@@ -945,30 +948,37 @@ export component StudyScreen inherits Rectangle {
                         alignment: start;
                         ActionButton {
                             label: @tr("Haut");
+                            enabled: !Studies.demo-active;
                             clicked => { Studies.request-unlock("metric", "a"); }
                         }
                         ActionButton {
                             label: @tr("Bas");
+                            enabled: !Studies.demo-active;
                             clicked => { Studies.request-unlock("metric", "b"); }
                         }
                         ActionButton {
                             label: @tr("BPA");
+                            enabled: !Studies.demo-active;
                             clicked => { Studies.request-unlock("metric", "c"); }
                         }
                         ActionButton {
                             label: @tr("Div./action");
+                            enabled: !Studies.demo-active;
                             clicked => { Studies.request-unlock("metric", "f"); }
                         }
                         ActionButton {
                             label: @tr("Ventes");
+                            enabled: !Studies.demo-active;
                             clicked => { Studies.request-unlock("metric", "sales"); }
                         }
                         ActionButton {
                             label: @tr("Bénéfice avant impôt");
+                            enabled: !Studies.demo-active;
                             clicked => { Studies.request-unlock("metric", "pretax"); }
                         }
                         ActionButton {
                             label: @tr("Valeur comptable / action");
+                            enabled: !Studies.demo-active;
                             clicked => { Studies.request-unlock("metric", "book"); }
                         }
                     }
