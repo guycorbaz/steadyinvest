@@ -475,6 +475,16 @@ fn our_read_copies() -> Vec<PathBuf> {
         .collect()
 }
 
+/// The permission bits of `path`, or `None` when it vanished (another test's copy).
+fn mode_if_present(path: &Path) -> Option<u32> {
+    use std::os::unix::fs::PermissionsExt;
+    match std::fs::metadata(path) {
+        Ok(meta) => Some(meta.permissions().mode() & 0o777),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => panic!("{}: {e}", path.display()),
+    }
+}
+
 #[test]
 fn the_private_read_copy_stays_private() {
     // M-a: `rwx------` directory, `rw-------` files, in the shared temp dir.
@@ -489,13 +499,21 @@ fn the_private_read_copy_stays_private() {
     let journal = Journal::open(&copy).expect("opens read-only");
     let copies = our_read_copies();
     assert!(!copies.is_empty(), "read through a private copy");
+    // Tests run as threads of ONE process, so `our_read_copies` also lists the other tests' copies —
+    // any of them may vanish between the listing and a read (the flake seen on main, 2026-10-01:
+    // `NotFound` on a mode read). A copy gone mid-check is another test's: skipped, never a failure.
     for scratch in &copies {
         let Ok(entries) = std::fs::read_dir(scratch) else {
             continue; // another test's copy, already gone
         };
-        assert_eq!(mode_of(scratch), 0o700, "{}", scratch.display());
+        let Some(dir_mode) = mode_if_present(scratch) else {
+            continue;
+        };
+        assert_eq!(dir_mode, 0o700, "{}", scratch.display());
         for entry in entries.flatten() {
-            let m = mode_of(&entry.path());
+            let Some(m) = mode_if_present(&entry.path()) else {
+                continue;
+            };
             assert_eq!(m & 0o077, 0, "{} is {m:o}", entry.path().display());
         }
     }
