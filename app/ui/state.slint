@@ -455,6 +455,9 @@ export struct ConfrontState {
     high-label: string,                 // formatted forecast-high bound
     low-label: string,                  // formatted forecast-low bound
     decision-date: string,
+    // FR50 (2026-10-01): where the band comes from — "decided" (the frozen verdict's), "frozen-no-band"
+    // (a frozen verdict without a band: today's), "current" (no frozen verdict: today's).
+    basis: string,
 }
 
 // §2 computed results: per-year PTP%/ROE% (aligned with year-headers), the 5-yr averages + trends.

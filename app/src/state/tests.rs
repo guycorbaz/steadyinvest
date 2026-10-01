@@ -10593,6 +10593,72 @@ mod frozen_8_8 {
         }
     }
 
+    // FR50 (project review 2026-10-01): the confrontation shows the projection DECIDED — the frozen
+    // verdict's band, dated the validation day — never one re-derived from a study edited since.
+    #[test]
+    fn the_confrontation_shows_the_decided_band_not_one_re_derived_since() {
+        use crate::state::ConfrontBasis;
+        let dir = TempDir::new().unwrap();
+        let (mut state, id) = full_state(&dir);
+        let unvalidated = state.confront(id);
+        assert_eq!(
+            unvalidated.basis,
+            ConfrontBasis::Current,
+            "re-derived, said so"
+        );
+        assert_eq!(unvalidated.decision_date, &NOW[..10], "dated the creation");
+        state.freeze_verdict(id).unwrap();
+        backdate(&mut state, id); // validated on 2026-09-01
+        let decided = state
+            .get_study(id)
+            .unwrap()
+            .frozen_verdict
+            .unwrap()
+            .zones
+            .expect("a Full verdict records its band");
+        // Closes before and after the validation day: only the later one is « since ».
+        for session in ["2026-08-20", "2026-09-15"] {
+            state
+                .apply_holding_price(
+                    id,
+                    rust_decimal::Decimal::new(61, 0),
+                    Some(session.to_string()),
+                )
+                .unwrap();
+        }
+        // The owner moves his judgment after the decision: today's band moves, the decided one not.
+        state
+            .set_judgment_field(id, "high_pe", Some(und_money(30)))
+            .unwrap();
+        let view = state.confront(id);
+        assert_eq!(view.basis, ConfrontBasis::Decided);
+        assert_eq!(view.forecast_high, Some(decided.forecast_high.as_decimal()));
+        assert_eq!(view.forecast_low, Some(decided.forecast_low.as_decimal()));
+        assert_eq!(view.decision_date, "2026-09-01");
+        let dates: Vec<&str> = view.actual.iter().map(|(d, _)| d.as_str()).collect();
+        assert!(
+            dates.contains(&"2026-09-15") && !dates.contains(&"2026-08-20"),
+            "{dates:?}"
+        );
+        let today = engine::build_snapshot(&state.get_study(id).unwrap())
+            .unwrap()
+            .outputs()
+            .risk_reward
+            .forecast_high;
+        assert_ne!(
+            view.forecast_high, today,
+            "the band moved since, the confrontation did not"
+        );
+        // A frozen verdict without a band (degenerate): today's band, dated the validation, named.
+        state
+            .mutate_study(id, |s| s.frozen_verdict.as_mut().unwrap().zones = None)
+            .unwrap();
+        let view = state.confront(id);
+        assert_eq!(view.basis, ConfrontBasis::FrozenWithoutBand);
+        assert_eq!(view.decision_date, "2026-09-01");
+        assert_eq!(view.forecast_high, today);
+    }
+
     // AC 10 — a method change (the stored method older than today's) is named.
     #[test]
     fn a_method_change_is_shown_and_named() {

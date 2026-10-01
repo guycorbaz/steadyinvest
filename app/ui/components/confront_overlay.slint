@@ -35,14 +35,25 @@ export component ConfrontOverlay inherits Rectangle {
             spacing: Tokens.space-16;
 
             Text {
-                text: @tr("Confrontation — l'estimation enregistrée face au cours réel");
+                // G3 review (2026-10-01): the title follows where the band comes from.
+                text: Confront.state.basis == "decided"
+                    ? @tr("Confrontation — l'estimation enregistrée face au cours réel")
+                    : @tr("Confrontation — l'estimation actuelle face au cours réel");
                 color: Tokens.text-high;
                 font-size: Tokens.font-h2;
                 font-weight: Tokens.weight-semibold;
                 wrap: word-wrap;
             }
-            Text {
-                text: @tr("Décision du {}", Confront.state.decision-date);
+            // FR50 (2026-10-01): which projection — the one decided (the frozen verdict), a frozen
+            // verdict without a band, or today's study re-derived; nothing said over an unreadable
+            // study (G3 review).
+            if !Confront.state.unavailable && Confront.state.decision-date != "": Text {
+                text: Confront.state.basis == "decided"
+                    ? @tr("Projection décidée : verdict figé le {}", Confront.state.decision-date)
+                    : Confront.state.basis == "frozen-no-band"
+                        ? @tr("Verdict figé le {} sans bande de prévision : bande recalculée avec l'étude actuelle", Confront.state.decision-date)
+                        : @tr("Aucun verdict figé : bande recalculée avec l'étude actuelle (étude créée le {})", Confront.state.decision-date);
+                wrap: word-wrap;
                 color: Tokens.text-mid;
                 font-family: Tokens.font-numeric;
                 font-size: Tokens.font-caption;

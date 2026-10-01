@@ -799,8 +799,11 @@ mod tests {
         // 1169, measured.
         // FR7 (2026-10-01): the study's « Signaux de la méthode : {} » line: 1169 + 1 = 1170,
         // measured.
+        // FR50 (project review 2026-10-01): the confrontation says where its band comes from — the
+        // title's « actuelle » form and three basis lines replace « Décision du {} »: 1170 − 1 + 4
+        // = 1173, measured.
         assert!(
-            total >= 1170,
+            total >= 1173,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
