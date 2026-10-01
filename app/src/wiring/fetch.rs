@@ -530,11 +530,13 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                             tracing::warn!(ticker = %outcome.ticker, "price refresh: provider returned no quote");
                             holdings.set_notice(state::MSG_PROVIDER_NO_DATA.into());
                             mark_holding_stale(&holding_freshness, &key);
+                            mark_study_prices_stale(&journal_state, &outcome.ticker);
                         }
                         Err(error) => {
                             tracing::warn!(ticker = %outcome.ticker, error = %error, "price refresh failed");
                             holdings.set_notice(state::provider_failure_notice(&error).into());
                             mark_holding_stale(&holding_freshness, &key);
+                            mark_study_prices_stale(&journal_state, &outcome.ticker);
                         }
                     }
                     // Re-render the open study too (a holding may BE the open study — its §4 zone bar
@@ -876,6 +878,21 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                 prefs.set_key_testing(true);
             }
         });
+    }
+}
+
+/// G3 review (FR23): a failed or empty holdings price refresh also flags the studies' fetched
+/// price stale (not a price fetched today), so the holdings register and the verdict agree.
+/// Best-effort: a failed write is logged — the holdings notice already names the failure.
+fn mark_study_prices_stale(
+    journal_state: &Rc<std::cell::RefCell<state::JournalState>>,
+    ticker: &str,
+) {
+    let flagged = journal_state
+        .borrow_mut()
+        .mark_price_stale_for_ticker(ticker);
+    if let Err(error) = flagged {
+        tracing::warn!(ticker = %ticker, "price staleness not recorded: {error}");
     }
 }
 

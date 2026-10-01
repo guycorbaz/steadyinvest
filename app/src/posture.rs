@@ -1044,8 +1044,9 @@ mod tests {
             // AVG_OVER_YEARS): 23 + 2 = 25.
             // Guy's on-screen test (2026-10-01, FR11): the price's origin (provider with session or
             // fetch date, typed, unknown) and the yearly data's provenance line (title + three
-            // parts) and a judgment placed by a validated AI proposal: 25 + 9 = 34.
-            34,
+            // parts) and a judgment placed by a validated AI proposal: 25 + 9 = 34. Its G3 review:
+            // the stale and calculated cells counted apart: 34 + 2 = 36.
+            36,
             "engine.rs label inventory changed — register the new label"
         );
     }

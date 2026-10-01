@@ -18,6 +18,8 @@
 //!   typed personal judgment is the user's own validated number, not provider data awaiting sign-off
 //!   (`None` → `Missing`). The verdict's all-validated-and-fresh gate is therefore, in practice,
 //!   gated by the §2/§3 *data* cells (2.5's review markers) once the judgment values are entered.
+//!   The current price is the exception (2026-10-01): it records its origin, and a fetched price
+//!   flagged stale by a failed refresh degrades the verdict (`report::form::price_to_gate_state`).
 //! - **`to_observations`**: v1 carries no quarterly data → [`QuarterlyObservations::empty`] → current
 //!   P/E / relative value are honestly `unknown` (quarterly capture is a later story / Epic 3).
 //! - **splits**: v1 manual entry records no split events → `splits: vec![]`.
@@ -888,10 +890,9 @@ fn trace_price(j: &steadyinvest_contract::Judgment, format: NumberFormat) -> Str
                 (Source::Provider, None) => {
                     TRACE_PRICE_PROVIDER_AT.replace("{}", &trace_date(&o.at.0))
                 }
-                // A price is never derived; read as the owner's own number if it ever were.
-                (Source::Manual | Source::Derived, _) => {
-                    TRACE_PRICE_TYPED.replace("{}", &trace_date(&o.at.0))
-                }
+                (Source::Manual, _) => TRACE_PRICE_TYPED.replace("{}", &trace_date(&o.at.0)),
+                // A price is never derived — never passed off as typed either (G3 review).
+                (Source::Derived, _) => TRACE_ORIGIN_UNKNOWN.to_string(),
             };
             if o.freshness == Freshness::Stale {
                 format!("{base} — {GATE_STALE}")
@@ -904,10 +905,11 @@ fn trace_price(j: &steadyinvest_contract::Judgment, format: NumberFormat) -> Str
 }
 
 /// The yearly data's provenance in one line (FR11): how many filled cells came from the provider
-/// (with the latest fetch date), from the owner's typing, or from a validated AI proposal.
+/// (with the latest update date and how many are stale), from the owner's typing, from the
+/// calculation, or from a validated AI proposal — each counted under its own name.
 fn trace_yearly(study: &Study) -> String {
-    use steadyinvest_contract::Source;
-    let (mut provider, mut typed, mut ai) = (0usize, 0usize, 0usize);
+    use steadyinvest_contract::{Freshness, Source};
+    let (mut provider, mut stale, mut typed, mut derived, mut ai) = (0usize, 0, 0, 0, 0);
     let mut latest: Option<&str> = None;
     for y in &study.years {
         let optional = [
@@ -921,14 +923,21 @@ fn trace_yearly(study: &Study) -> String {
         for c in cells.filter(|c| c.value.is_some()) {
             if c.provenance.ai_origin.is_some() {
                 ai += 1;
-            } else if c.source == Source::Provider {
-                provider += 1;
-                let at = c.provenance.timestamp.0.as_str();
-                if latest.is_none_or(|l| at > l) {
-                    latest = Some(at);
+                continue;
+            }
+            match c.source {
+                Source::Provider => {
+                    provider += 1;
+                    if c.freshness == Freshness::Stale {
+                        stale += 1;
+                    }
+                    let at = c.provenance.timestamp.0.as_str();
+                    if latest.is_none_or(|l| at > l) {
+                        latest = Some(at);
+                    }
                 }
-            } else {
-                typed += 1;
+                Source::Manual => typed += 1,
+                Source::Derived => derived += 1,
             }
         }
     }
@@ -939,12 +948,18 @@ fn trace_yearly(study: &Study) -> String {
                 .replacen("{}", &provider.to_string(), 1)
                 .replacen("{}", &trace_date(latest.unwrap_or_default()), 1),
         );
+        if stale > 0 {
+            parts.push(TRACE_YEARLY_STALE.replace("{}", &stale.to_string()));
+        }
     }
-    if typed > 0 {
-        parts.push(TRACE_YEARLY_TYPED.replace("{}", &typed.to_string()));
-    }
-    if ai > 0 {
-        parts.push(TRACE_YEARLY_AI.replace("{}", &ai.to_string()));
+    for (count, template) in [
+        (typed, TRACE_YEARLY_TYPED),
+        (derived, TRACE_YEARLY_DERIVED),
+        (ai, TRACE_YEARLY_AI),
+    ] {
+        if count > 0 {
+            parts.push(template.replace("{}", &count.to_string()));
+        }
     }
     let body = if parts.is_empty() {
         EMPTY_SLOT.to_string()
@@ -1168,13 +1183,15 @@ pub const TRACE_TITLE_VERDICT: &str = "Conclusion — entrées, provenance & rè
 // data in the traceability.
 pub const TRACE_PRICE_PROVIDER_SESSION: &str = "fournisseur, séance du {}";
 pub const TRACE_PRICE_PROVIDER_AT: &str = "fournisseur, récupéré le {}";
-pub const TRACE_PRICE_TYPED: &str = "saisi le {}";
+pub const TRACE_PRICE_TYPED: &str = "manuel, saisi le {}";
 pub const TRACE_ORIGIN_UNKNOWN: &str = "origine non enregistrée";
 pub const TRACE_AI_VALIDATED: &str = "proposé par l'IA, validé le {}";
 pub const TRACE_YEARLY: &str = "Données annuelles";
-pub const TRACE_YEARLY_PROVIDER: &str = "{} du fournisseur (dernière récupération le {})";
-pub const TRACE_YEARLY_TYPED: &str = "{} saisie(s)";
-pub const TRACE_YEARLY_AI: &str = "{} proposée(s) par l'IA et validée(s)";
+pub const TRACE_YEARLY_PROVIDER: &str = "{} cellule(s) du fournisseur (dernière mise à jour le {})";
+pub const TRACE_YEARLY_STALE: &str = "dont {} périmée(s)";
+pub const TRACE_YEARLY_TYPED: &str = "{} cellule(s) manuelle(s)";
+pub const TRACE_YEARLY_DERIVED: &str = "{} cellule(s) calculée(s)";
+pub const TRACE_YEARLY_AI: &str = "{} cellule(s) proposée(s) par l'IA et validée(s)";
 pub const TRACE_RULE_PREFIX: &str = "Méthode";
 pub const TRACE_VERDICT_FORMULA: &str = "zones §4 + ratio H/B + appréciation §5";
 /// The FR8 low-confidence reason carried onto the verdict surface (Story 2.7, AC1). Fact-stating,
@@ -1219,7 +1236,9 @@ pub const USER_FACING_LABELS: &[&str] = &[
     TRACE_AI_VALIDATED,
     TRACE_YEARLY,
     TRACE_YEARLY_PROVIDER,
+    TRACE_YEARLY_STALE,
     TRACE_YEARLY_TYPED,
+    TRACE_YEARLY_DERIVED,
     TRACE_YEARLY_AI,
     TRACE_RULE_PREFIX,
     TRACE_VERDICT_FORMULA,
@@ -1859,6 +1878,18 @@ mod tests {
             6,
             "the five load-bearing judgment inputs with provenance, then the yearly data's line"
         );
+        // G3 review: the price line is the real-origin line, never the old « (manuel) » default.
+        let lines: Vec<String> = trace.inputs.iter().map(|l| l.to_string()).collect();
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("Prix actuel : ") && !l.contains("manuel")),
+            "{lines:?}"
+        );
+        assert!(
+            lines.last().unwrap().starts_with("Données annuelles : "),
+            "{lines:?}"
+        );
         assert!(
             trace.rule.as_str().contains(snap.method_version()),
             "the rule line carries the method identity"
@@ -2159,7 +2190,7 @@ mod tests {
         j.current_price_origin = Some(o(Source::Manual, None, Freshness::Current));
         assert_eq!(
             trace_price(&j, NumberFormat::Comma),
-            "Prix actuel : 227,21 (saisi le 01/10/2026)"
+            "Prix actuel : 227,21 (manuel, saisi le 01/10/2026)"
         );
         j.current_price_origin = None;
         assert_eq!(
@@ -2179,7 +2210,10 @@ mod tests {
             full_judgment(),
         );
         // Typed cells only.
-        assert_eq!(trace_yearly(&study), "Données annuelles : 14 saisie(s)");
+        assert_eq!(
+            trace_yearly(&study),
+            "Données annuelles : 14 cellule(s) manuelle(s)"
+        );
         // One fetched cell, one validated AI proposal.
         study.years[0].sales.source = Source::Provider;
         study.years[0].sales.provenance.timestamp = Timestamp("2026-09-30T08:00:00Z".to_string());
@@ -2191,8 +2225,17 @@ mod tests {
         });
         assert_eq!(
             trace_yearly(&study),
-            "Données annuelles : 1 du fournisseur (dernière récupération le 30/09/2026) · \
-             12 saisie(s) · 1 proposée(s) par l'IA et validée(s)"
+            "Données annuelles : 1 cellule(s) du fournisseur (dernière mise à jour le 30/09/2026) · \
+             12 cellule(s) manuelle(s) · 1 cellule(s) proposée(s) par l'IA et validée(s)"
+        );
+        // A stale fetched cell is counted as such; a derived one is never passed off as typed.
+        study.years[0].sales.freshness = Freshness::Stale;
+        study.years[0].eps.source = Source::Derived;
+        assert_eq!(
+            trace_yearly(&study),
+            "Données annuelles : 1 cellule(s) du fournisseur (dernière mise à jour le 30/09/2026) · \
+             dont 1 périmée(s) · 11 cellule(s) manuelle(s) · 1 cellule(s) calculée(s) · \
+             1 cellule(s) proposée(s) par l'IA et validée(s)"
         );
     }
 

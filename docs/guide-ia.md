@@ -227,7 +227,7 @@ cent (`12` pour 12 %), PER en simple multiple.
 | Outil | Ce qu'il fait |
 |---|---|
 | `list_studies` | liste les études (id, symbole, date, statut), par pages de 50 (au plus 200) |
-| `get_study` | lit une étude complète : cellules et provenance, jugements, justification, notes, verdict figé, résultats calculés (zones en codes neutres `low` / `middle` / `high`, ratio hausse/baisse, potentiel, faits du verdict) |
+| `get_study` | lit une étude complète (y compris l'origine du cours actuel, `judgment.current_price_origin` : fournisseur ou saisie, date, séance, « stale » après un rafraîchissement échoué) : cellules et provenance, jugements, justification, notes, verdict figé, résultats calculés (zones en codes neutres `low` / `middle` / `high`, ratio hausse/baisse, potentiel, faits du verdict) |
 | `get_judgment_history` | l'historique d'une étude, chaque entrée étant l'étude entière à une sauvegarde passée (pages de 20, au plus 50) |
 | `get_notes` | les notes d'une étude |
 | `get_drafts_record` | le registre de toutes les propositions et de leur issue (en attente, validée, validée puis annulée, rejetée), filtrable par statut et par étude |
