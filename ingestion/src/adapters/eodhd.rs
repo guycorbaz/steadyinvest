@@ -361,8 +361,8 @@ pub fn map_eodhd(
         let row_currency = row
             .and_then(|r| r.get("currency_symbol"))
             .and_then(Value::as_str)
-            .filter(|c| c.len() == 3 && c.bytes().all(|b| b.is_ascii_uppercase()))
-            .map(str::to_string);
+            .filter(|c| c.len() == 3 && c.bytes().all(|b| b.is_ascii_alphabetic()))
+            .map(str::to_ascii_uppercase);
         d.map(|value| RawAmount {
             value,
             currency: row_currency.unwrap_or_else(|| currency.clone()),
@@ -1218,10 +1218,10 @@ mod tests {
             "CHF",
             "no field: the listing's"
         );
-        // A malformed code (lower-case) is not trusted: the listing currency stands.
+        // A lower-case code is read (upper-cased), never silently replaced by the listing's.
         assert_eq!(
             y(2023).book_value_per_share.as_ref().unwrap().currency,
-            "CHF"
+            "USD"
         );
         assert_eq!(fin.native_currency, "CHF");
     }

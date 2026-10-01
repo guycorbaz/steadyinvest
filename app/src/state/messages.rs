@@ -280,9 +280,14 @@ pub const MSG_TICKER_SUGGESTION: &str =
 /// FR5 / FR10 (project review 2026-10-01): the provider quotes the symbol in another currency than
 /// the study's — its figures would be read in the wrong currency (a silent false signal).
 pub const MSG_CURRENCY_STUDY_MISMATCH: &str = "Le fournisseur donne {ticker} en {provider}, l'étude est en {study} ; une étude se tient dans la devise de ses chiffres, rien n'a été appliqué.";
-/// FR5 / FR10: the provider's statements are in another currency than the listing's prices — the
-/// P/E, zones and ratios would mix two currencies without conversion.
-pub const MSG_CURRENCY_MIXED: &str = "Le fournisseur publie les comptes de {ticker} dans une autre devise que sa cotation ({listing}) ; sans conversion, les chiffres ne sont pas comparables : rien n'a été appliqué.";
+/// The same for an examination: the currency picked, no study yet.
+pub const MSG_CURRENCY_CHOSEN_MISMATCH: &str = "Le fournisseur donne {ticker} en {provider}, la devise choisie est {chosen} ; rien n'est montré dans une autre devise que la sienne.";
+/// A listing quoted in a currency's hundredths (London pence GBX / GBp, ZAc, ILA): the app has no
+/// such currency and does not convert prices — named, never read as the unit currency.
+pub const MSG_CURRENCY_SUBUNIT: &str = "Le fournisseur cote {ticker} en centièmes de devise ({provider}) ; l'application ne convertit pas ces cours, rien n'a été appliqué.";
+/// FR10 (G3 review): statements reported in another currency than the listing — a visible warning,
+/// never a block (method spec §3: plausibility warnings never block the computation).
+pub const MSG_CURRENCY_MIXED: &str = "Les comptes de {ticker} sont publiés en {reported}, sa cotation est en {listing} : le PER, les zones et les ratios mêlent deux devises sans conversion.";
 /// G1 H (#237, owner decision 10): the share-split history could not be read, so the fetch is
 /// refused whole (no price at a wrong scale) — named apart from the fundamentals / prices
 /// failures. The plan-excludes-it (403) and usage-limit (429) causes keep their own wording; any
@@ -1107,35 +1112,64 @@ pub fn provider_failure_notice_with_hint(
     }
 }
 
-/// FR5 / FR10 (project review 2026-10-01): the refusal of a fetch whose currencies do not match —
-/// the listing currency ≠ the study's (`expected`), or statements reported in another currency than
-/// the listing's (`normalize`'s `currency_mismatch` findings). `None` when the figures can be read
-/// in `expected`. Case-insensitive on the codes.
+/// The listing codes the provider uses for a currency's hundredths (London pence, Johannesburg
+/// cents, Tel Aviv agorot) — exact codes, case carries the meaning (`GBp` ≠ `GBP`).
+const SUBUNIT_CODES: [&str; 4] = ["GBX", "GBp", "ZAc", "ILA"];
+
+/// FR5 / FR10 (project review 2026-10-01): the refusal of a fetch quoted in another currency than
+/// `expected` (the study's, or the one picked for an examination — `for_study` picks the wording):
+/// `None` when the listing currency is `expected` (case-insensitive for ordinary codes), or when
+/// the provider states none. A listing in a currency's hundredths is refused by its own name.
 pub fn currency_refusal(
     ticker: &str,
     expected: &str,
     fetched: &steadyinvest_ingestion::FetchedFinancials,
+    for_study: bool,
 ) -> Option<String> {
-    let listing = fetched.native_currency.trim().to_ascii_uppercase();
-    let expected = expected.trim().to_ascii_uppercase();
-    if !listing.is_empty() && listing != expected {
+    let raw = fetched.native_currency.trim();
+    if SUBUNIT_CODES.contains(&raw) {
         return Some(
-            MSG_CURRENCY_STUDY_MISMATCH
+            MSG_CURRENCY_SUBUNIT
                 .replace("{ticker}", ticker)
-                .replace("{provider}", &listing)
-                .replace("{study}", &expected),
+                .replace("{provider}", raw),
         );
     }
-    let mixed = fetched
-        .canonical
-        .findings
+    let listing = raw.to_ascii_uppercase();
+    let expected = expected.trim().to_ascii_uppercase();
+    if listing.is_empty() || listing == expected {
+        return None;
+    }
+    let template = if for_study {
+        MSG_CURRENCY_STUDY_MISMATCH.replace("{study}", &expected)
+    } else {
+        MSG_CURRENCY_CHOSEN_MISMATCH.replace("{chosen}", &expected)
+    };
+    Some(
+        template
+            .replace("{ticker}", ticker)
+            .replace("{provider}", &listing),
+    )
+}
+
+/// FR10 (G3 review): the warning when the statements of the years `applied` are reported in
+/// another currency than the listing — named, never a block. `None` otherwise.
+pub fn currency_warning(
+    ticker: &str,
+    fetched: &steadyinvest_ingestion::FetchedFinancials,
+    applied: &[i32],
+) -> Option<String> {
+    let reported = fetched
+        .reported_currencies
         .iter()
-        .any(|f| f.key == steadyinvest_core::normalize::PlausibilityKey::CurrencyMismatch);
-    mixed.then(|| {
+        .filter(|(year, _)| applied.contains(year))
+        .map(|(_, c)| c.as_str())
+        .next()?;
+    Some(
         MSG_CURRENCY_MIXED
             .replace("{ticker}", ticker)
-            .replace("{listing}", &listing)
-    })
+            .replace("{reported}", reported)
+            .replace("{listing}", fetched.native_currency.trim()),
+    )
 }
 
 /// PURE: the key test's verdict (Story 3.2) for Réglages — a statement about the KEY, cause-named.
@@ -1361,6 +1395,8 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_TICKER_CONVENTION,
     MSG_TICKER_SUGGESTION,
     MSG_CURRENCY_STUDY_MISMATCH,
+    MSG_CURRENCY_CHOSEN_MISMATCH,
+    MSG_CURRENCY_SUBUNIT,
     MSG_CURRENCY_MIXED,
     MSG_REFRESH_NOCHANGE,
     MSG_REFRESH_PRICE,

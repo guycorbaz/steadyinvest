@@ -453,7 +453,7 @@ pub(crate) fn on_fetched(
         // FR5 / FR10 (project review 2026-10-01): figures in another currency than the one picked
         // are never shown as if they were in it — refused by name, like a study refresh.
         Ok(fetched) => {
-            match state::currency_refusal(&outcome.ticker, &outcome.currency, &fetched) {
+            match state::currency_refusal(&outcome.ticker, &outcome.currency, &fetched, false) {
                 Some(refusal) => Err(refusal),
                 None => Ok(fetched),
             }
