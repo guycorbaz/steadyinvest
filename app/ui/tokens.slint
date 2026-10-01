@@ -99,7 +99,14 @@ export global Tokens {
     out property <int> weight-regular: 400;
     out property <int> weight-medium: 500;
     out property <int> weight-semibold: 600;
-    // Flat elevation: 1 px borders, no shadows.
+    // Elevation: 1 px borders; buttons alone carry a discreet relief (Guy's on-screen test,
+    // 2026-10-01: « que les boutons aient un aspect 3D et s'enfoncent quand on appuie ») — a 1 px
+    // top light and a 1 px drop shadow, gone when pressed. Derived from the theme, never a hue.
+    out property <color> relief-shadow: root.dark ? #000000 : #9aa0aa;
+    out property <color> relief-light: root.dark ? #ffffff38 : #ffffff;
+    // The fill of a pressed (or selected, sunk) face: clearly darker than its rest fill.
+    out property <color> relief-pressed: root.dark ? #0f1115 : #dfe2e7;
+    out property <length> relief: 1px;
     out property <length> border: 1px;
     out property <length> focus-border: 2px;
     out property <length> radius: 4px;
