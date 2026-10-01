@@ -797,8 +797,10 @@ mod tests {
         // FR63 (Guy's on-screen test, 2026-10-01): the dashboard's three zone nouns and the
         // glossary term now read the active label set (`Labels.zone-*`), not literals: 1173 − 4 =
         // 1169, measured.
+        // FR7 (2026-10-01): the study's « Signaux de la méthode : {} » line: 1169 + 1 = 1170,
+        // measured.
         assert!(
-            total >= 1169,
+            total >= 1170,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -1087,7 +1089,8 @@ mod tests {
             // fetch date, typed, unknown) and the yearly data's provenance line (title + three
             // parts) and a judgment placed by a validated AI proposal: 25 + 9 = 34. Its G3 review:
             // the stale and calculated cells counted apart: 34 + 2 = 36.
-            36,
+            // FR7 (2026-10-01): « aucun » of the study's quality-flags line: 36 + 1 = 37.
+            37,
             "engine.rs label inventory changed — register the new label"
         );
     }

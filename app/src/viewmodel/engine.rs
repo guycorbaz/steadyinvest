@@ -969,6 +969,34 @@ fn trace_yearly(study: &Study) -> String {
     format!("{TRACE_YEARLY} : {body}")
 }
 
+/// The method's quality flags of a study, as one line (FR7, Guy's on-screen test 2026-10-01: the
+/// AI saw « PER haut jugé au-dessus de 25 », the study screen did not): the flags as the
+/// comparison and the review list them (`state::shown_quality_flags`, one high-P/E flag), « aucun »
+/// when every rule was checked and none fired, `""` when not assessable (an unknown is never
+/// stated as « aucun »).
+pub fn quality_flags_line(
+    outputs: &SsgOutputs,
+    judgment: &steadyinvest_contract::Judgment,
+) -> String {
+    let flags = crate::state::shown_quality_flags(&outputs.quality_flags);
+    if flags.is_empty() {
+        let assessable = steadyinvest_core::ssg::quality_flags_assessable(
+            outputs,
+            &steadyinvest_report::form::to_judgment_inputs(judgment),
+        );
+        return if assessable {
+            FLAGS_NONE.to_string()
+        } else {
+            String::new()
+        };
+    }
+    flags
+        .iter()
+        .map(|k| crate::state::quality_flag_label(*k))
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
 /// The current judgment-input values surfaced as locale-formatted strings for the entry fields
 /// (so reopening restores them) + the selected forecast-low option key.
 pub fn judgment_fields(study: &Study, format: NumberFormat) -> JudgmentFields {
@@ -1179,6 +1207,8 @@ pub const TREND_EVEN: &str = "stable";
 pub const TREND_DOWN: &str = "baisse";
 pub const PROVENANCE_MANUAL: &str = "manuel";
 pub const TRACE_TITLE_VERDICT: &str = "Conclusion — entrées, provenance & règle";
+/// FR7 (2026-10-01): no quality flag fired, every rule checked.
+pub const FLAGS_NONE: &str = "aucun";
 // Guy's on-screen test (2026-10-01, FR11): the real origin of the current price and of the yearly
 // data in the traceability.
 pub const TRACE_PRICE_PROVIDER_SESSION: &str = "fournisseur, séance du {}";
@@ -1229,6 +1259,7 @@ pub const USER_FACING_LABELS: &[&str] = &[
     TREND_DOWN,
     PROVENANCE_MANUAL,
     TRACE_TITLE_VERDICT,
+    FLAGS_NONE,
     TRACE_PRICE_PROVIDER_SESSION,
     TRACE_PRICE_PROVIDER_AT,
     TRACE_PRICE_TYPED,
@@ -2278,5 +2309,26 @@ mod tests {
             ),
             "PER haut moyen : —"
         );
+    }
+
+    // FR7 (Guy's on-screen test, 2026-10-01): the quality flags on the study screen.
+    #[test]
+    fn the_quality_flags_line_states_the_flags_none_or_nothing() {
+        let years: Vec<YearData> = (2021..=2025).map(|y| year(y, validated_cell)).collect();
+        // A judged high P/E of 45: over 25 — one flag line (the higher threshold only).
+        let mut judgment = full_judgment();
+        judgment.judged_avg_high_pe = Some(money("45"));
+        let study = study_with(years.clone(), judgment);
+        let snap = build_snapshot(&study).unwrap();
+        let line = quality_flags_line(snap.outputs(), &study.judgment);
+        assert!(line.contains("PER haut jugé au-dessus de 25"), "{line}");
+        assert!(!line.contains("au-dessus de 20"), "{line}");
+        // Not assessable (a load-bearing judgment missing): nothing, never « aucun ».
+        let mut unknown = full_judgment();
+        unknown.judged_avg_high_pe = None;
+        let study = study_with(years, unknown);
+        let snap = build_snapshot(&study).unwrap();
+        let line = quality_flags_line(snap.outputs(), &study.judgment);
+        assert_ne!(line, FLAGS_NONE);
     }
 }

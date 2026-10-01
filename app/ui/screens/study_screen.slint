@@ -1044,6 +1044,14 @@ export component StudyScreen inherits Rectangle {
                         KeyFigure { label: @tr("Croissance BPA (TCAC)"); value: Studies.growth-computed.eps-cagr; }
                         KeyFigure { label: @tr("Potentiel 5 ans"); value: Studies.return-computed.total-return; }
                     }
+                    // FR7 (Guy's on-screen test, 2026-10-01): the method's quality flags on the study
+                    // itself — the comparison, the review and the AI saw them, this screen did not.
+                    if Studies.quality-flags != "": Text {
+                        text: @tr("Signaux de la méthode : {}", Studies.quality-flags);
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        wrap: word-wrap;
+                    }
 
                     Rectangle { height: Tokens.border; background: Tokens.separator; }
 
