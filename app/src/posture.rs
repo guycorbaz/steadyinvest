@@ -802,8 +802,11 @@ mod tests {
         // FR50 (project review 2026-10-01): the confrontation says where its band comes from — the
         // title's « actuelle » form and three basis lines replace « Décision du {} »: 1170 − 1 + 4
         // = 1173, measured.
+        // FR63 (owner decision, Guy 2026-10-01): the comparison's rows 17–19 and its row-20 words
+        // read the active label set (`Labels.zone-*`), not literals: 1173 − 6 = 1167 (the six
+        // literals removed, counted).
         assert!(
-            total >= 1173,
+            total >= 1167,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -858,8 +861,9 @@ mod tests {
     /// FR63 (Guy's on-screen test + review, 2026-10-01): a zone noun is never hard-coded — it comes
     /// from the active label set (`Labels.zone-*`), so the NAIC and neutral vocabularies are never
     /// mixed. Scans every `@tr` literal and every Rust `MSG_*` for the six zone nouns of the label
-    /// table (case-insensitive). Exempt: `comparison.slint`, neutral by owner decision 2026-09-26
-    /// (« the report never carries the label-set words »), like the PDFs (report crate, unscanned).
+    /// table (case-insensitive). No exemption since the owner decision of 2026-10-01 (Guy): the
+    /// comparison follows the active set like every NAIC-methodology screen — its PDF too, and the
+    /// study and review PDFs (`steadyinvest_report::ZoneNouns`, passed by the app; tested there).
     #[test]
     fn zone_nouns_come_from_the_label_set_never_hard_coded() {
         let nouns: Vec<String> = crate::labels::LABELS
@@ -871,9 +875,6 @@ mod tests {
         assert_eq!(nouns.len(), 6, "three zones, two label sets");
         let mut hits = Vec::new();
         for path in slint_files() {
-            if path.ends_with("comparison.slint") {
-                continue;
-            }
             let source = std::fs::read_to_string(&path).unwrap();
             for literal in tr_literals(&source) {
                 let lower = literal.to_lowercase();

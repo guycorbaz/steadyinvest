@@ -656,8 +656,13 @@ pub(crate) fn push_review(
 
 /// The report's value, built from the SAME pushed rows (one formatting path, no drift) —
 /// including every named absence the screen states (unavailable blocks, missing pairs, the
-/// other-currency cause), so the PDF never says less than the screen.
-fn report_value(ui: &MainWindow) -> steadyinvest_report::PortfolioReview {
+/// other-currency cause), so the PDF never says less than the screen — and in the screen's zone
+/// nouns: the review is part of the NAIC methodology, its PDF follows the active label set
+/// (`zones`, FR63 — owner decision, Guy 2026-10-01).
+fn report_value(
+    ui: &MainWindow,
+    zones: steadyinvest_report::ZoneNouns,
+) -> steadyinvest_report::PortfolioReview {
     use steadyinvest_report::{DueLine, PortfolioReview, ReviewLine, ShareLine};
     let r = ui.global::<Review>();
     let shares = |m: ModelRc<ReviewShareRow>| -> Vec<ShareLine> {
@@ -787,6 +792,7 @@ fn report_value(ui: &MainWindow) -> steadyinvest_report::PortfolioReview {
             ),
             ("due".into(), r.get_count_due().to_string()),
         ],
+        zones,
     }
 }
 
@@ -824,7 +830,7 @@ pub(crate) fn wire_review(ui: &MainWindow, s: &Session) {
                 // The dossier could not be read just now: the screen says so; nothing to export.
                 return;
             }
-            let value = report_value(&ui);
+            let value = report_value(&ui, crate::labels::zone_nouns(config.borrow().label_set));
             let bytes = steadyinvest_report::render_portfolio_review(&value);
             let mut dialog = rfd::FileDialog::new()
                 .set_title("Exporter la revue en PDF")

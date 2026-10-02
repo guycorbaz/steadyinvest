@@ -2,7 +2,9 @@
 //! and white (colour only as a second channel — owner decision, Guy 2026-09-26): up to five
 //! studies as columns, the comparison form's thirty rows in four groups. The `app` formats the
 //! figures (its one float→string boundary) and passes keys for the two worded rows (the zone,
-//! the study state); this module owns every label (its neutral inventory, tested).
+//! the study state); this module owns every label (its neutral inventory, tested) but the zone
+//! nouns, which are the active label set's ([`Comparison::zones`] — the comparison is the NAIC
+//! Stock Comparison Guide, part of the methodology: owner decision, Guy 2026-10-01, FR63).
 //!
 //! Owner decision (Guy, 2026-09-26), the NAIC Stock Comparison Guide's semantics: a row that
 //! corresponds to a judged input (2, 4, 12, 14) shows the JUDGED value the calculation used, as
@@ -11,6 +13,7 @@
 use crate::pdf::{
     Doc, EM_DASH, JUDGED_NOTE, JUDGED_SIGIL, MARGIN, SMALL, fit, judged, wrap_to_width,
 };
+use crate::zones::{ZoneNouns, lower};
 
 /// One study's column: the header facts and the thirty rows (index 0 = the form's row 1).
 /// Rows 20 and 28 are keys carried in `zone` / `state` instead; their string slot stays `""`.
@@ -67,6 +70,8 @@ pub struct Comparison {
     /// The selected studies are not all in one currency — prices stay native (FR28).
     pub currency_mix: bool,
     pub columns: Vec<ComparisonColumn>,
+    /// The active label set's zone nouns (rows 17–19 and the row-20 words) — FR63.
+    pub zones: ZoneNouns,
 }
 
 // ── the neutral inventory (FR13) ──
@@ -102,9 +107,10 @@ const ROWS: [&str; 30] = [
     "PER bas moyen jugé",
     "PER le plus bas sur 5 ans",
     "PER actuel",
-    "Zone basse",
-    "Zone médiane",
-    "Zone haute",
+    // Rows 17–19 are worded by `row_label`: the active label set's zone nouns (FR63).
+    ZoneNouns::NEUTRAL.low,
+    ZoneNouns::NEUTRAL.middle,
+    ZoneNouns::NEUTRAL.high,
     "Position du cours actuel",
     "Ratio hausse / baisse",
     "Rendement présent",
@@ -117,12 +123,10 @@ const ROWS: [&str; 30] = [
     "Date des données",
     "Place de cotation",
 ];
-// Row 20 names the band of rows 17–19 in their own words — the screen says the same (G1, #237) —
-// in lower case like every other worded cell (owner decision, 2026-09-26: « zone médiane »,
-// « sous la bande », as « provisoire » or « données validées » in row 28).
-const ZONE_BUY: &str = "zone basse";
-const ZONE_NEUTRAL: &str = "zone médiane";
-const ZONE_SELL: &str = "zone haute";
+// Row 20 names the band of rows 17–19 in their own words — the screen says the same (G1, #237),
+// the active label set's nouns (FR63, 2026-10-01) — in lower case like every other worded cell
+// (owner decision, 2026-09-26: « zone médiane », « sous la bande », as « provisoire » or
+// « données validées » in row 28).
 const ZONE_BELOW: &str = "sous la bande";
 const ZONE_ABOVE: &str = "au-dessus de la bande";
 // Owner decision (Guy, 2026-09-26): rows 20–23 — where the current price sits, the ratio, the
@@ -158,9 +162,6 @@ const COMPARISON_USER_FACING: &[&str] = &[
     G_MANAGEMENT,
     G_PRICE,
     G_OTHER,
-    ZONE_BUY,
-    ZONE_NEUTRAL,
-    ZONE_SELL,
     ZONE_BELOW,
     ZONE_ABOVE,
     STATE_FULL,
@@ -178,11 +179,15 @@ const COMPARISON_USER_FACING: &[&str] = &[
     JUDGED_NOTE,
 ];
 
-/// The label of row `n` (1-based): the fixed inventory, but rows 5 / 6 say the years averaged.
-fn row_label(columns: &[ComparisonColumn], n: usize) -> String {
+/// The label of row `n` (1-based): the fixed inventory, but rows 5 / 6 say the years averaged
+/// and rows 17–19 are the active label set's zone nouns (FR63).
+fn row_label(columns: &[ComparisonColumn], n: usize, zones: ZoneNouns) -> String {
     let (many, one, none) = match n {
         5 => (PTP_AVG_N, PTP_AVG_ONE, PTP_AVG),
         6 => (ROE_AVG_N, ROE_AVG_ONE, ROE_AVG),
+        17 => return zones.low.to_string(),
+        18 => return zones.middle.to_string(),
+        19 => return zones.high.to_string(),
         _ => return ROWS[n - 1].to_string(),
     };
     match average_years(columns, n) {
@@ -192,15 +197,16 @@ fn row_label(columns: &[ComparisonColumn], n: usize) -> String {
     }
 }
 
-fn zone_label(key: &str) -> &str {
+fn zone_label(key: &str, zones: ZoneNouns) -> String {
+    if let Some(noun) = zones.of_key(key) {
+        return lower(noun);
+    }
     match key {
-        "buy" => ZONE_BUY,
-        "neutral" => ZONE_NEUTRAL,
-        "sell" => ZONE_SELL,
         "below" => ZONE_BELOW,
         "above" => ZONE_ABOVE,
         _ => EM_DASH,
     }
+    .to_string()
 }
 
 fn state_label(c: &ComparisonColumn) -> String {
@@ -251,7 +257,7 @@ fn flag_list(cols: &[ComparisonColumn]) -> Vec<String> {
 }
 
 /// The cell of row `n` (1-based) for a column: the figure, the worded key rows, or the absence.
-fn cell(c: &ComparisonColumn, n: usize) -> String {
+fn cell(c: &ComparisonColumn, n: usize, zones: ZoneNouns) -> String {
     if c.missing {
         return MISSING.to_string();
     }
@@ -262,7 +268,7 @@ fn cell(c: &ComparisonColumn, n: usize) -> String {
         return UNAVAILABLE.to_string();
     }
     match n {
-        20 => zone_label(&c.zone).to_string(),
+        20 => zone_label(&c.zone, zones),
         27 => c
             .rows
             .get(26)
@@ -329,7 +335,7 @@ fn second_header_line(c: &ComparisonColumn) -> String {
 }
 
 /// Render the comparison (FR53): A4 landscape, deterministic, black-and-white-safe, neutral
-/// labels.
+/// labels — the zone nouns the active label set's (FR63).
 pub fn render_comparison(comparison: &Comparison) -> Vec<u8> {
     let mut doc = Doc::landscape();
     doc.title(TITLE);
@@ -339,6 +345,7 @@ pub fn render_comparison(comparison: &Comparison) -> Vec<u8> {
     }
     doc.gap(4.0);
     let cols = &comparison.columns;
+    let zones = comparison.zones;
     if cols.is_empty() {
         doc.line(EMPTY);
         return doc.finish();
@@ -376,8 +383,8 @@ pub fn render_comparison(comparison: &Comparison) -> Vec<u8> {
         (G_OTHER, 24..=30),
     ];
     let row_cells = |row: usize| -> Vec<String> {
-        let mut cells = vec![format!("({row}) {}", row_label(cols, row))];
-        cells.extend(cols.iter().map(|c| printed(&cell(c, row))));
+        let mut cells = vec![format!("({row}) {}", row_label(cols, row, zones))];
+        cells.extend(cols.iter().map(|c| printed(&cell(c, row, zones))));
         cells
     };
     for (title, range) in groups {
@@ -391,7 +398,9 @@ pub fn render_comparison(comparison: &Comparison) -> Vec<u8> {
         // grid that holds a judged cell (a group split by a page break explains it on both).
         doc.set_grid_note(JUDGED_NOTE);
         for row in range {
-            let marked = cols.iter().any(|c| cell(c, row).ends_with(JUDGED_SIGIL));
+            let marked = cols
+                .iter()
+                .any(|c| cell(c, row, zones).ends_with(JUDGED_SIGIL));
             let cells = row_cells(row);
             let refs: Vec<&str> = cells.iter().map(String::as_str).collect();
             if row == *PRICE_TAIL.start() {
@@ -461,6 +470,7 @@ mod tests {
             date: "2026-09-24".into(),
             currency_mix: true,
             columns: vec![column("NESN.SW", false), column("ROG.SW", true)],
+            zones: ZoneNouns::NEUTRAL,
         };
         let a = render_comparison(&c);
         let b = render_comparison(&c);
@@ -476,19 +486,19 @@ mod tests {
     #[test]
     fn the_key_rows_word_themselves_and_an_unavailable_column_says_so() {
         let c = column("X", false);
-        assert_eq!(cell(&c, 20), ZONE_BUY);
+        assert_eq!(cell(&c, 20, ZoneNouns::NEUTRAL), "zone basse");
         assert_eq!(
-            cell(&c, 28),
+            cell(&c, 28, ZoneNouns::NEUTRAL),
             format!("{STATE_PROVISIONAL} · {LOW_CONFIDENCE}")
         );
-        assert_eq!(cell(&c, 1), "v1");
+        assert_eq!(cell(&c, 1, ZoneNouns::NEUTRAL), "v1");
         let u = column("Y", true);
-        assert_eq!(cell(&u, 1), UNAVAILABLE);
-        assert_eq!(cell(&u, 20), UNAVAILABLE);
+        assert_eq!(cell(&u, 1, ZoneNouns::NEUTRAL), UNAVAILABLE);
+        assert_eq!(cell(&u, 20, ZoneNouns::NEUTRAL), UNAVAILABLE);
         // An empty figure is the em-dash, never a blank cell.
         let mut e = column("Z", false);
         e.rows[9] = String::new();
-        assert_eq!(cell(&e, 10), EM_DASH);
+        assert_eq!(cell(&e, 10, ZoneNouns::NEUTRAL), EM_DASH);
     }
 
     #[test]
@@ -497,46 +507,84 @@ mod tests {
         c.rows[26] =
             "3 : PER haut jugé au-dessus de la moyenne · ratio sous la cible · marge en baisse"
                 .into();
-        assert_eq!(cell(&c, 27), "3");
+        assert_eq!(cell(&c, 27, ZoneNouns::NEUTRAL), "3");
         assert_eq!(
             flag_words(&c).as_deref(),
             Some("PER haut jugé au-dessus de la moyenne · ratio sous la cible · marge en baisse")
         );
         c.rows[26] = "0".into();
-        assert_eq!(cell(&c, 27), "0");
+        assert_eq!(cell(&c, 27, ZoneNouns::NEUTRAL), "0");
         assert_eq!(flag_words(&c), None);
         // Not assessable: the em-dash, never « 0 ».
         c.rows[26] = String::new();
-        assert_eq!(cell(&c, 27), EM_DASH);
+        assert_eq!(cell(&c, 27, ZoneNouns::NEUTRAL), EM_DASH);
         let mut t = column("T", false);
         t.rows[4] = "47,6 % · ↑ hausse".into();
-        assert_eq!(cell(&t, 5), "47,6 % · hausse");
+        assert_eq!(cell(&t, 5, ZoneNouns::NEUTRAL), "47,6 % · hausse");
     }
 
     #[test]
     fn row_20_uses_the_band_rows_own_nouns() {
         // The screen words row 20 with the same nouns (comparison.slint `zone-words`), in lower
-        // case like the other worded cells (owner decision, 2026-09-26).
+        // case like the other worded cells (owner decision, 2026-09-26) — the active label set's
+        // nouns, as rows 17–19 (FR63, 2026-10-01).
         let mut c = column("X", false);
-        for (key, row) in [("buy", 17), ("neutral", 18), ("sell", 19)] {
-            c.zone = key.into();
-            assert_eq!(cell(&c, 20), ROWS[row - 1].to_lowercase());
+        for zones in [ZoneNouns::NEUTRAL, ZoneNouns::NAIC] {
+            for (key, row) in [("buy", 17), ("neutral", 18), ("sell", 19)] {
+                c.zone = key.into();
+                assert_eq!(
+                    cell(&c, 20, zones),
+                    row_label(&[], row, zones).to_lowercase()
+                );
+            }
+            for key in ["below", "above"] {
+                c.zone = key.into();
+                let word = cell(&c, 20, zones);
+                assert_eq!(word, word.to_lowercase(), "{word}");
+            }
+            c.zone = String::new();
+            assert_eq!(cell(&c, 20, zones), EM_DASH);
         }
-        for key in ["below", "above"] {
-            c.zone = key.into();
-            let word = cell(&c, 20);
-            assert_eq!(word, word.to_lowercase(), "{word}");
+    }
+
+    #[test]
+    fn the_zone_nouns_follow_the_active_label_set() {
+        // FR63 (owner decision, Guy 2026-10-01): the comparison is the NAIC Stock Comparison
+        // Guide — rows 17–19 and the row-20 words are the active set's, never the other's.
+        for (zones, other) in [
+            (ZoneNouns::NAIC, ZoneNouns::NEUTRAL),
+            (ZoneNouns::NEUTRAL, ZoneNouns::NAIC),
+        ] {
+            assert_eq!(row_label(&[], 17, zones), zones.low);
+            assert_eq!(row_label(&[], 18, zones), zones.middle);
+            assert_eq!(row_label(&[], 19, zones), zones.high);
+            let mut a = column("A", false);
+            a.zone = "sell".into();
+            let bytes = render_comparison(&Comparison {
+                date: "2026-10-01".into(),
+                currency_mix: false,
+                columns: vec![a, column("B", false)],
+                zones,
+            });
+            assert!(carries(&bytes, &format!("(17) {}", zones.low)));
+            assert!(carries(&bytes, &format!("(18) {}", zones.middle)));
+            assert!(carries(&bytes, &format!("(19) {}", zones.high)));
+            assert!(carries(&bytes, &zones.low.to_lowercase()), "row 20, buy");
+            assert!(carries(&bytes, &zones.high.to_lowercase()), "row 20, sell");
+            for noun in [other.low, other.middle, other.high] {
+                assert!(!carries(&bytes, noun), "{noun} leaks into the other set");
+                assert!(!carries(&bytes, &noun.to_lowercase()), "{noun} (lowered)");
+            }
         }
-        c.zone = String::new();
-        assert_eq!(cell(&c, 20), EM_DASH);
+        assert_eq!(Comparison::default().zones, ZoneNouns::NEUTRAL);
     }
 
     #[test]
     fn a_missing_study_is_not_worded_as_a_read_failure() {
         let mut m = column("NESN.SW", false);
         m.missing = true;
-        assert_eq!(cell(&m, 1), MISSING);
-        assert_eq!(cell(&m, 28), MISSING);
+        assert_eq!(cell(&m, 1, ZoneNouns::NEUTRAL), MISSING);
+        assert_eq!(cell(&m, 28, ZoneNouns::NEUTRAL), MISSING);
         assert_ne!(MISSING, UNAVAILABLE);
     }
 
@@ -567,7 +615,7 @@ mod tests {
         x.uncomputable = true;
         assert_eq!(header_line(&x), "NESN.SW (CHF)");
         assert_eq!(second_header_line(&x), "2026-09-24 · non calculable");
-        assert_eq!(cell(&x, 1), UNCOMPUTABLE);
+        assert_eq!(cell(&x, 1, ZoneNouns::NEUTRAL), UNCOMPUTABLE);
         assert_ne!(UNCOMPUTABLE, UNAVAILABLE);
     }
 
@@ -612,16 +660,16 @@ mod tests {
         let cols = [a.clone(), b.clone()];
         assert_eq!(average_years(&cols, 5), Some(5));
         assert_eq!(
-            row_label(&cols, 5),
+            row_label(&cols, 5, ZoneNouns::NEUTRAL),
             "Marge avant impôt, moyenne 5 ans · tendance"
         );
         // The columns differ: no number in the label (each cell names its own years).
         assert_eq!(average_years(&cols, 6), None);
-        assert_eq!(row_label(&cols, 6), ROE_AVG);
+        assert_eq!(row_label(&cols, 6, ZoneNouns::NEUTRAL), ROE_AVG);
         // Three years everywhere: « moyenne 3 ans », never « 5 ans ».
         b.roe_avg_years = 3;
         assert_eq!(
-            row_label(&[a.clone(), b.clone()], 6),
+            row_label(&[a.clone(), b.clone()], 6, ZoneNouns::NEUTRAL),
             "Rendement des capitaux propres, moyenne 3 ans · tendance"
         );
         // A column with no average, or no figures, does not vote.
@@ -630,9 +678,9 @@ mod tests {
         u.roe_avg_years = 1;
         assert_eq!(average_years(&[a.clone(), b, u], 6), Some(3));
         a.ptp_avg_years = 1;
-        assert_eq!(row_label(&[a], 5), PTP_AVG_ONE);
-        assert_eq!(row_label(&[], 5), PTP_AVG);
-        assert_eq!(row_label(&[], 7), ROWS[6]);
+        assert_eq!(row_label(&[a], 5, ZoneNouns::NEUTRAL), PTP_AVG_ONE);
+        assert_eq!(row_label(&[], 5, ZoneNouns::NEUTRAL), PTP_AVG);
+        assert_eq!(row_label(&[], 7, ZoneNouns::NEUTRAL), ROWS[6]);
     }
 
     /// The PDF's pages, as raw content streams, in order.
@@ -665,13 +713,14 @@ mod tests {
         assert_eq!(ROWS[13], "PER bas moyen jugé");
         let mut a = column("A", false);
         a.rows[11] = "78,0*".into();
-        assert_eq!(cell(&a, 12), "78,0*");
-        assert_eq!(printed(&cell(&a, 12)), judged("78,0"));
+        assert_eq!(cell(&a, 12, ZoneNouns::NEUTRAL), "78,0*");
+        assert_eq!(printed(&cell(&a, 12, ZoneNouns::NEUTRAL)), judged("78,0"));
         assert_eq!(printed("—"), "—");
         let bytes = render_comparison(&Comparison {
             date: "2026-09-26".into(),
             currency_mix: false,
             columns: vec![a, column("B", false)],
+            zones: ZoneNouns::NEUTRAL,
         });
         assert!(carries(&bytes, JUDGED_NOTE));
         assert!(carries(&bytes, "78,0*"));
@@ -701,6 +750,7 @@ mod tests {
             date: "2026-09-26".into(),
             currency_mix: false,
             columns: cols,
+            zones: ZoneNouns::NEUTRAL,
         });
         let pages = pages(&bytes);
         let page_of = |s: &str| pages.iter().position(|p| carries(p, s));

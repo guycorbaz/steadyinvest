@@ -417,10 +417,11 @@ per-field « {champ} {figé} -> {actuel} » list (réconcilié 2026-10-01 : stor
   {JJ/MM/AAAA} ({méthode}) » with its figures and, when it differs from the current one, lines
   « libellé : figé -> actuel » (not a ruled table), changed lines marked « • » (0x95), and the cause
   line (réconcilié 2026-10-01 : story 8.8 décisions 13, 14).
-- **Comparison (7.1) and review (7.2) — screens and PDFs unchanged, by decision** (Q9).
-  **Décision en attente (Guy) :** vocabulaire neutre de l'écran Comparaison et des PDF (décision du
-  2026-09-26) face à FR63 — tout le reste suit désormais le jeu de libellés (réconcilié 2026-10-01 :
-  PR #275).
+- **Comparison (7.1) and review (7.2) — screens and PDFs unchanged, by decision** (Q9), except
+  their zone nouns: the study, the Comparison and the Revue — screens and PDFs — follow the active
+  label set, no exception; the screens outside the NAIC methodology (quick screen, criblage,
+  holdings, watchlist, AI proposals) and the MCP codes stay neutral (réconcilié 2026-10-01 : PR #275;
+  décision Guy 2026-10-01, qui remplace celle du 2026-09-26 — Comparaison et PDF neutres).
 
 ## 8. Acceptance criteria
 

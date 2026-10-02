@@ -77,6 +77,8 @@ editHistory:
     changes: "G2 round 3 (G3 review of PR #255, owner decisions D1–D10; D11 FR68 decision time = explicit « Valider l'étude » on a full verdict, differences highlighted, delivered in Story 8.8): draft study carries a proposed currency and optional name, duplicates keyed by identifier + currency, validation through the prefilled create dialog (FR70); one pending draft per target, provider market facts not draftable, missing target not validatable (FR72); `?` in every case, validation undoable and recorded (FR74, FR77); older builds refuse exports carrying notes/AI marks/drafts (FR60); dossier identity is not configuration (NFR-S4, Appendix A); CLI/AI façade wording updated"
   - date: '2026-10-01'
     changes: "H3 text reconciliation (Epic 8 retro action H3, widened by the 2026-10-01 project review, revue-projet-2026-10-01/p1-*.md and p2-ecarts-textes.md): the text now states what main does, each changed passage tagged « réconcilié 2026-10-01 ». FR20 + Journey 2b + scope (a divergent refresh freezes a ✓ cell, provider value parked — issue #110 / PR #123); FR33 [P1] (app-side dimmed seeds and « hist. » chips — issue #121 / PR #137); FR68 (current verdict always live, difference shown on any change, no FX in a study verdict — D11 / A13 / story 8.8 decision 1; [P4] label); FR60 (the G2 round-3 entry above is corrected: an older build refuses only the drafts table, it silently drops notes, AI marks and the frozen verdict — D9 withdrawn, story 8.1); FR41 + Appendix A (one default withholding rate, configurable, per-entry override — story 6.4); FR3 (projection window, 5-year horizon — story 2.11); FR28 (the rate's date is its freshness state — story 6.6); FR62 (help = glossary hub in Réglages; demo reachable from the study list — story 2.13, PR #279/#284); FR67 (sync folder: warning + recommendation, manual backups — story 5.5); FR5/FR10/FR12/FR23/FR50/FR63 updated for the fixes of PRs #274–#286 (listing-currency refusal, stale fetched price degrades the verdict, confrontation from the frozen band, zone nouns follow the label set). Owner decisions still open are marked « Décision en attente (Guy) » (price age horizon, mixed statement currency, GBX, comparison/PDF neutral wording, confrontation re-validation date) — not decided here. Earlier entries kept unchanged."
+  - date: '2026-10-01'
+    changes: "FR63 — owner decision (Guy, 2026-10-01): the zone nouns follow the active label set on every NAIC-methodology screen and its PDF (study, Comparison, portfolio Revue), no exception; quick screen, criblage, holdings, watchlist, AI proposals and MCP codes stay neutral. Replaces the 2026-09-26 decision (Comparison and PDFs neutral); pending decision closed"
 ---
 
 # Product Requirements Document - steadyinvest
@@ -926,9 +928,12 @@ withholding-refund tracking, export/share, eventual public release.
 ### Configuration, Posture & Operation
 - FR63 **[P1]:** The user can configure providers/keys, the single global reference currency, risk
   thresholds, the label set (NAIC↔neutral) and locale number format — without a blocking setup flow.
-  Every zone noun on screen follows the active label set, except the Comparison screen and the PDFs,
-  neutral whatever the set (owner decision 2026-09-26) (réconcilié 2026-10-01 : PR #275).
-  Décision en attente (Guy) : Comparaison et PDF en vocabulaire neutre, face à FR63 — à confirmer.
+  The zone nouns follow the active label set on every screen of the NAIC methodology and in its
+  PDF — the study (SSG), the Comparison (Stock Comparison Guide), the portfolio Revue — with no
+  exception; the screens outside the methodology stay neutral whatever the set: quick screen,
+  criblage, holdings, watchlist, AI proposals, and the MCP server's codes (low / middle / high)
+  (réconcilié 2026-10-01 : PR #275; owner decision Guy 2026-10-01, replacing the 2026-09-26 one that
+  kept the Comparison and the PDFs neutral).
 - FR64 **[P1]:** A disclaimer (educational, not a financial advisor) is **always visible** — including
   in the draft inbox and beside every AI-origin item [P4]; the app's own outputs never issue
   recommendations, and AI proposals are always labelled as such.

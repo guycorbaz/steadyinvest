@@ -5,6 +5,10 @@
 //! Guy 2026-09-26). Depends only on `core` and `contract` so it can run headless. Implemented
 //! in Story 5.6 (study PDF) and extended in Epic 7 (other forms).
 //!
+//! FR63 (owner decision, Guy 2026-10-01): the reports of the NAIC methodology — the study, the
+//! comparison, the portfolio review — print the zone nouns of the active label set the app passes
+//! in ([`ZoneNouns`]); the quick screen's report has no zone noun and stays neutral.
+//!
 //! - [`form`] owns the single `Study → core::StudySnapshot` construction path (relocated here so the
 //!   live form in `app` and the PDF here share ONE construction — no drift). `app` re-exports it.
 //! - [`pdf`] lays out the faithful, neutral, black-and-white-safe SSG form with `pdf-writer`.
@@ -15,6 +19,7 @@ pub mod frozen;
 pub mod pdf;
 pub mod quick_screen;
 pub mod review;
+pub mod zones;
 
 pub use comparison::{Comparison, ComparisonColumn, average_years, render_comparison};
 pub use pdf::{
@@ -23,3 +28,4 @@ pub use pdf::{
 };
 pub use quick_screen::{QuickScreen, QuickScreenLadder, QuickScreenPriceRow, render_quick_screen};
 pub use review::{DueLine, PortfolioReview, ReviewLine, ShareLine, render_portfolio_review};
+pub use zones::ZoneNouns;
