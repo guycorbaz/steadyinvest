@@ -162,7 +162,8 @@ component StudyListRow inherits Rectangle {
         }
         // Guy's on-screen test (2026-09-30): the upside/downside ratio right after the potential —
         // a neutral FACT like it (no hue, right-aligned tabular figures, « — » when undefined or
-        // unknown). Fixed-width slot so the column aligns across every row.
+        // unknown, or when the verdict is withheld — Guy, 2026-10-01). Fixed-width slot so the
+        // column aligns across every row. Also the « Tri : U/D » sort key.
         Rectangle {
             width: 80px;
             background: transparent;
@@ -374,6 +375,13 @@ export component DashboardScreen inherits Rectangle {
                         label: @tr("Tri : potentiel");
                         selected: Studies.sort-key == "potential";
                         activated => { Studies.set-sort("potential", Studies.sort-descending); }
+                    }
+                    // Guy, 2026-10-01: sort by the U/D ratio column (exact decimals); a withheld
+                    // verdict or an absent ratio (« — ») sorts last in both orders, as potential.
+                    ChoiceChip {
+                        label: @tr("Tri : U/D");
+                        selected: Studies.sort-key == "ud";
+                        activated => { Studies.set-sort("ud", Studies.sort-descending); }
                     }
                     ChoiceChip {
                         label: Studies.sort-descending ? @tr("Ordre : décroissant") : @tr("Ordre : croissant");

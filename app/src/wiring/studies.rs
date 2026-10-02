@@ -258,18 +258,19 @@ pub(crate) fn refresh_studies(ui: &MainWindow, state: &JournalState) {
             Some(r) => crate::viewmodel::engine::fmt_total_return(r, format),
             None => crate::viewmodel::form::EMPTY_SLOT.to_string(),
         };
-        // Guy's on-screen test (2026-09-30): the U/D ratio off the SAME snapshot, as the study
-        // shows it.
-        let ud = match &snapshot {
-            Some(snap) => crate::viewmodel::engine::fmt_ud(
-                &snap.outputs().risk_reward.upside_downside,
-                format,
-            ),
-            None => crate::viewmodel::form::EMPTY_SLOT.to_string(),
-        };
         let incomplete = snapshot
             .as_ref()
             .is_some_and(crate::viewmodel::engine::study_incomplete);
+        // Guy's on-screen test (2026-09-30): the U/D ratio off the SAME snapshot. Guy, 2026-10-01
+        // (« Tri : U/D »): « — » and no sort value when the verdict is withheld — it sorts last.
+        let (ud, ud_value) = match &snapshot {
+            Some(snap) => viewmodel::studies::ud_facts(
+                &snap.outputs().risk_reward.upside_downside,
+                incomplete,
+                format,
+            ),
+            None => (crate::viewmodel::form::EMPTY_SLOT.to_string(), None),
+        };
         // 2026-07-12: the present-price zone/position off the SAME snapshot — the list noun.
         // buy/neutral/sell inside the band; below/above outside it (an honest distinct state, not
         // a blank and not a forced buy/sell); "" when there is no band or no price.
@@ -286,6 +287,7 @@ pub(crate) fn refresh_studies(ui: &MainWindow, state: &JournalState) {
                 value,
                 display,
                 ud,
+                ud_value,
                 incomplete,
                 zone,
                 // The user-entered company name shown after the ticker on the list row (2026-07-12).

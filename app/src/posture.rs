@@ -802,8 +802,11 @@ mod tests {
         // FR50 (project review 2026-10-01): the confrontation says where its band comes from — the
         // title's « actuelle » form and three basis lines replace « Décision du {} »: 1170 − 1 + 4
         // = 1173, measured.
+        // Main measured 1178 before the next entry (+5 merged since FR50 without a tally line).
+        // « Tri : U/D » (Guy, 2026-10-01): the dashboard's fifth sort chip: 1178 + 1 = 1179,
+        // measured.
         assert!(
-            total >= 1173,
+            total >= 1179,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
