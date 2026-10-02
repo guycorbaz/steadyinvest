@@ -266,12 +266,16 @@ Plausibility warnings never block computation; they surface at the cell.
 
 **Currency, at the fetch (app layer, before anything reaches the engine):** a provider **listing**
 currency other than the study's (or than the currency chosen for an examination) is **refused** —
-nothing applied, named to the owner; a listing in a currency's hundredths (GBX, GBp, ZAc, ILA) is
-refused by its own name. Statements **reported** in another currency than the listing are
-**applied with a named warning**, per the rule above (réconcilié 2026-10-01 : PR #277).
-Décision en attente (Guy) : comptes publiés dans une autre devise que la cotation — avertir (état
-actuel) ou bloquer. Décision en attente (Guy) : cotations en centièmes (GBX…) — refusées
-aujourd'hui ; conversion ou non.
+nothing applied, named to the owner. A listing quoted in a currency's hundredths (GBX, GBp → GBP;
+ZAc → ZAR; ILA → ILS — exact codes, the case carries the meaning) is **converted at the fetch**
+(ingestion, before normalization): every price figure — each year's high and low, the latest close,
+the price-only holdings close — is divided by 100 exactly (decimal, never rounded), the listing
+currency becomes the major one, and the provider's code is recorded on the study and named in the
+traceability. Statement figures (sales, EPS, dividend and book value per share, trailing EPS) are
+served in the major currency and are never divided. Statements **reported** in another currency
+than the listing are **applied with a named warning**, per the rule above (réconcilié 2026-10-01 :
+PR #277 ; conversion des centièmes, décision Guy 2026-10-01). Décision en attente (Guy) : comptes
+publiés dans une autre devise que la cotation — avertir (état actuel) ou bloquer.
 
 **`split_series_break` — normative detection rule** *(absorbed at ssg-1.1.0; quantifies
 "inconsistent with sales")*:

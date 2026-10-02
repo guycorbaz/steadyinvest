@@ -12,6 +12,7 @@ pub mod adapters;
 pub mod error;
 pub mod fetch;
 pub mod provider;
+pub mod subunit;
 pub mod ticker;
 
 pub use error::{IngestionError, ProviderError};
@@ -20,6 +21,7 @@ pub use fetch::{
     fetch_fx_rate, fetch_price, min_request_interval, supports,
 };
 pub use provider::{DatedClose, MarketDataProvider};
+pub use subunit::{is_subunit_listing, subunit_major};
 
 // Re-export the canonical types callers need to stamp cells, so `app` need not also reach into
 // `core::normalize` for them.

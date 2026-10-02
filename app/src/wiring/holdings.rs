@@ -1158,7 +1158,9 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
             let ui = ui_weak.unwrap();
             let holdings = ui.global::<Holdings>();
             let reference = config.borrow().reference_currency_or_default();
-            let jobs: Vec<(Uuid, String)> = {
+            // Owner decision 2026-10-01: each job carries the hundredths code its study's last
+            // fetch recorded (GBX…), so the price-only quote is converted like the study's prices.
+            let jobs: Vec<(Uuid, String, Option<String>)> = {
                 let state = journal_state.borrow();
                 let mut seen = std::collections::HashSet::new();
                 state
@@ -1168,9 +1170,12 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                         // Issue #81 + D5: the price-refresh target is the lot's ONE link.
                         state
                             .lot_study_id(&h.security_ticker, h.currency.as_deref(), &reference)
-                            .map(|sid| (sid, h.security_ticker))
+                            .map(|sid| {
+                                let subunit = state.get_study(sid).and_then(|s| s.listing_subunit);
+                                (sid, h.security_ticker, subunit)
+                            })
                     })
-                    .filter(|(_, ticker)| seen.insert(ticker.to_uppercase()))
+                    .filter(|(_, ticker, _)| seen.insert(ticker.to_uppercase()))
                     .collect()
             };
             if jobs.is_empty() {
@@ -1199,7 +1204,7 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
             // Count only jobs the worker actually accepted — if the worker is gone, don't latch
             // `refreshing` (which would disable the button for the rest of the session). (Issue #52.)
             let mut enqueued = 0usize;
-            for (study_id, ticker) in jobs {
+            for (study_id, ticker, listing_subunit) in jobs {
                 if fetch_tx
                     .send(fetch::WorkerJob::RefreshHolding {
                         request: fetch::FetchRequest {
@@ -1210,6 +1215,7 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
                         },
                         // G1 final review (G3 #2): the dossier this price belongs to.
                         generation: dossier_generation.get(),
+                        listing_subunit,
                     })
                     .is_ok()
                 {

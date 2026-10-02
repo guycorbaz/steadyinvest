@@ -285,9 +285,6 @@ pub const MSG_TICKER_SUGGESTION: &str =
 pub const MSG_CURRENCY_STUDY_MISMATCH: &str = "Le fournisseur donne {ticker} en {provider}, l'étude est en {study} ; une étude se tient dans la devise de ses chiffres, rien n'a été appliqué.";
 /// The same for an examination: the currency picked, no study yet.
 pub const MSG_CURRENCY_CHOSEN_MISMATCH: &str = "Le fournisseur donne {ticker} en {provider}, la devise choisie est {chosen} ; rien n'est montré dans une autre devise que la sienne.";
-/// A listing quoted in a currency's hundredths (London pence GBX / GBp, ZAc, ILA): the app has no
-/// such currency and does not convert prices — named, never read as the unit currency.
-pub const MSG_CURRENCY_SUBUNIT: &str = "Le fournisseur cote {ticker} en centièmes de devise ({provider}) ; l'application ne convertit pas ces cours, rien n'a été appliqué.";
 /// FR10 (G3 review): statements reported in another currency than the listing — a visible warning,
 /// never a block (method spec §3: plausibility warnings never block the computation).
 pub const MSG_CURRENCY_MIXED: &str = "Les comptes de {ticker} sont publiés en {reported}, sa cotation est en {listing} : le PER, les zones et les ratios mêlent deux devises sans conversion.";
@@ -1111,14 +1108,13 @@ pub fn provider_failure_notice_with_hint(
     }
 }
 
-/// The listing codes the provider uses for a currency's hundredths (London pence, Johannesburg
-/// cents, Tel Aviv agorot) — exact codes, case carries the meaning (`GBp` ≠ `GBP`).
-const SUBUNIT_CODES: [&str; 4] = ["GBX", "GBp", "ZAc", "ILA"];
-
 /// FR5 / FR10 (project review 2026-10-01): the refusal of a fetch quoted in another currency than
 /// `expected` (the study's, or the one picked for an examination — `for_study` picks the wording):
-/// `None` when the listing currency is `expected` (case-insensitive for ordinary codes), or when
-/// the provider states none. A listing in a currency's hundredths is refused by its own name.
+/// `None` when the listing currency is `expected` (case-insensitive), or when the provider states
+/// none. A listing in a currency's hundredths (GBX…) arrives here already converted to its major
+/// currency by the ingestion (owner decision 2026-10-01): a GBX line is a GBP listing. Should a
+/// hundredths code ever reach here unconverted, its exact spelling is kept (`GBp` ≠ `GBP`), so it
+/// is refused as another currency — never read as the unit currency.
 pub fn currency_refusal(
     ticker: &str,
     expected: &str,
@@ -1126,14 +1122,11 @@ pub fn currency_refusal(
     for_study: bool,
 ) -> Option<String> {
     let raw = fetched.native_currency.trim();
-    if SUBUNIT_CODES.contains(&raw) {
-        return Some(
-            MSG_CURRENCY_SUBUNIT
-                .replace("{ticker}", ticker)
-                .replace("{provider}", raw),
-        );
-    }
-    let listing = raw.to_ascii_uppercase();
+    let listing = if steadyinvest_ingestion::is_subunit_listing(raw) {
+        raw.to_string()
+    } else {
+        raw.to_ascii_uppercase()
+    };
     let expected = expected.trim().to_ascii_uppercase();
     if listing.is_empty() || listing == expected {
         return None;
@@ -1396,7 +1389,6 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_TICKER_SUGGESTION,
     MSG_CURRENCY_STUDY_MISMATCH,
     MSG_CURRENCY_CHOSEN_MISMATCH,
-    MSG_CURRENCY_SUBUNIT,
     MSG_CURRENCY_MIXED,
     MSG_REFRESH_NOCHANGE,
     MSG_REFRESH_PRICE,

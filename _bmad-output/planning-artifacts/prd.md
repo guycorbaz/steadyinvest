@@ -753,11 +753,13 @@ withholding-refund tracking, export/share, eventual public release.
 - FR4 **[P1]:** The system computes the SSG output set (enumerated in Appendix A) deterministically
   from a study's inputs.
 - FR5 **[P1]:** All study calculations are performed in the security's native currency. A fetch whose
-  listing currency differs from the study's, or that is quoted in a currency's hundredths (GBX, GBp,
-  ZAc, ILA), is refused whole and named, nothing applied; statements reported in another currency
-  than the listing are applied with a named warning (réconcilié 2026-10-01 : PR #277).
-  Décision en attente (Guy) : comptes publiés dans une autre devise que la cotation — avertir (code
-  actuel, spec méthode §3) ou bloquer ; cotations en centièmes (GBX…) — refus actuel, ou conversion.
+  listing currency differs from the study's is refused whole and named, nothing applied; a listing
+  quoted in a currency's hundredths (GBX, GBp, ZAc, ILA) has its prices converted to the major
+  currency (÷ 100, exact) at the fetch and is accepted as that currency, the conversion named in
+  the traceability; statements reported in another currency than the listing are applied with a
+  named warning (réconcilié 2026-10-01 : PR #277 ; conversion des centièmes, décision Guy
+  2026-10-01). Décision en attente (Guy) : comptes publiés dans une autre devise que la cotation —
+  avertir (code actuel, spec méthode §3) ou bloquer.
 - FR6 **[P1]:** The user can set judgment inputs (future growth, forecast P/E, low-price method) and
   see results recompute.
 - FR7 **[P1]:** The system raises methodology quality flags per the thresholds in Appendix A.

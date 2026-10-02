@@ -157,6 +157,7 @@ fn fetched_custom(
     FetchedFinancials {
         canonical: normalize(raw).expect("the test raw normalizes"),
         native_currency: "CHF".to_string(),
+        listing_subunit: None,
         reported_currencies: Vec::new(),
         digest: digest.to_string(),
         latest_price: None,
@@ -306,6 +307,7 @@ fn provider_fetch_drops_the_in_progress_year_without_annual_statements() {
         })
         .expect("normalizes"),
         native_currency: "CHF".to_string(),
+        listing_subunit: None,
         reported_currencies: Vec::new(),
         digest: "d109".to_string(),
         latest_price: None,
@@ -11193,14 +11195,43 @@ mod currency_check {
             .unwrap();
     }
 
+    // Owner decision 2026-10-01: a listing quoted in hundredths reaches the app converted by the
+    // ingestion (native currency = the major one, the provider's code recorded) and is applied to a
+    // study in that currency; the study keeps the code for the traceability and the price refresh.
     #[test]
-    fn a_listing_in_hundredths_is_refused_by_its_own_name() {
-        let fetched = fetched_in(&YEARS, "GBX");
-        let refused = crate::state::currency_refusal("ULVR.LSE", "GBP", &fetched, true).unwrap();
-        assert!(refused.contains("centièmes de devise (GBX)"), "{refused}");
+    fn a_listing_converted_from_hundredths_is_applied_and_its_code_recorded() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0xC3, "2026-10-01T09:00:00Z");
+        let id = state.create_study("ULVR.LSE", "GBP").unwrap();
+        let converted = FetchedFinancials {
+            native_currency: "GBP".to_string(),
+            listing_subunit: Some("GBX".to_string()),
+            ..fetched_with_price(&YEARS, 45)
+        };
+        assert_eq!(
+            crate::state::currency_refusal("ULVR.LSE", "GBP", &converted, true),
+            None
+        );
+        state.apply_provider_refresh(id, &converted).unwrap();
+        let study = state.get_study(id).unwrap();
+        assert!(!study.years.is_empty(), "applied");
+        assert_eq!(study.listing_subunit.as_deref(), Some("GBX"));
+        // A later fetch served as is (the provider now quotes in pounds) clears the record.
+        state
+            .apply_provider_refresh(id, &fetched_in(&YEARS, "GBP"))
+            .unwrap();
+        assert_eq!(state.get_study(id).unwrap().listing_subunit, None);
+    }
+
+    #[test]
+    fn an_unconverted_hundredths_code_is_never_read_as_the_unit_currency() {
         // `GBp` (pence) is not `GBP` (pounds) — the case carries the meaning here.
-        let pence = fetched_in(&YEARS, "GBp");
-        assert!(crate::state::currency_refusal("ULVR.LSE", "GBP", &pence, true).is_some());
+        for code in ["GBX", "GBp"] {
+            let raw = fetched_in(&YEARS, code);
+            let refused =
+                crate::state::currency_refusal("ULVR.LSE", "GBP", &raw, true).expect(code);
+            assert!(refused.contains(&format!("en {code},")), "{refused}");
+        }
     }
 
     #[test]

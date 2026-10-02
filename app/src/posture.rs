@@ -1020,7 +1020,9 @@ mod tests {
             // MSG_CURRENCY_SUBUNIT): 258 + 2 = 260, measured.
             // G3 catch-up of #267–#270: a year with only divergences left (MSG_YEAR_ONLY_LEFT):
             // 260 + 1 = 261, measured.
-            261,
+            // Owner decision 2026-10-01: a listing in hundredths is converted at the fetch, no
+            // longer refused (MSG_CURRENCY_SUBUNIT removed): 261 − 1 = 260, measured.
+            260,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured. The G1 final review of the study PDF export
@@ -1099,7 +1101,9 @@ mod tests {
             // parts) and a judgment placed by a validated AI proposal: 25 + 9 = 34. Its G3 review:
             // the stale and calculated cells counted apart: 34 + 2 = 36.
             // FR7 (2026-10-01): « aucun » of the study's quality-flags line: 36 + 1 = 37.
-            37,
+            // Owner decision 2026-10-01: the traceability line of a listing converted from
+            // hundredths (TRACE_LISTING_SUBUNIT): 37 + 1 = 38, measured.
+            38,
             "engine.rs label inventory changed — register the new label"
         );
     }

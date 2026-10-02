@@ -116,6 +116,10 @@ impl JournalState {
         // Issue #113: the trailing-twelve-months EPS (current-P/E denominator), a present market fact
         // riding alongside the price (not part of the canonical annual calc).
         let ttm_eps = fetched.ttm_eps;
+        // Owner decision 2026-10-01: the provider's hundredths code (GBX…) when the ingestion
+        // converted this fetch's prices — recorded on the study for the traceability and for the
+        // price-only refresh, whose bare quote states no currency. A fetch served as is clears it.
+        let listing_subunit = fetched.listing_subunit.clone();
         let report = std::cell::Cell::new(RefreshReport::default());
         let report_ref = &report;
         self.mutate_study(study_id, move |study| {
@@ -167,6 +171,7 @@ impl JournalState {
             if let Some(ttm) = ttm_eps {
                 study.judgment.ttm_eps = Some(Money::from(ttm));
             }
+            study.listing_subunit = listing_subunit.clone();
             report_ref.set(acc);
         })?;
         // Story 5.1: cache the latest close into the price-history trajectory (confront's source).

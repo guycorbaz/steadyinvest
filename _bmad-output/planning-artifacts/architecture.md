@@ -471,11 +471,16 @@ against this skeleton as the principal go/no-go before committing UI work.
   stale only after a failure, never by age. **Décision en attente (Guy) : horizon d'âge du cours
   (FR23, « un jour de bourse » par défaut, réglable) — non implémenté.** An unknown symbol's notice
   names the app's ticker convention (`.DE` → `.XETRA`, `.AX` → `.AU`; `ingestion::ticker`). A
-  provider listing currency different from the study's is **refused** before anything is applied,
-  as is a listing quoted in hundredths (GBX, GBp, ZAc, ILA); statements reported in another
-  currency than the listing are applied with a named **warning**. **Décision en attente (Guy) :
-  comptes publiés dans une autre devise — avertir ou bloquer ; cotations en centièmes (GBX…) —
-  refusées, convertir ou non.**
+  provider listing currency different from the study's is **refused** before anything is applied.
+  A listing quoted in hundredths (GBX, GBp → GBP; ZAc → ZAR; ILA → ILS) is **converted** at one
+  place, `ingestion::subunit`, called by `fetch_canonical` and `fetch_price` before `normalize`:
+  price figures ÷ 100 (exact decimal), `native_currency` = the major code, the provider's code in
+  `FetchedFinancials.listing_subunit` → `Study.listing_subunit` (additive serde field; traceability
+  line, and the price-only holdings refresh, whose bare quote states no currency, converts on it);
+  statement figures are never divided (réconcilié 2026-10-01 : décision Guy, conversion des
+  centièmes). Statements reported in another currency than the listing are applied with a named
+  **warning**. **Décision en attente (Guy) : comptes publiés dans une autre devise — avertir ou
+  bloquer.**
 - **Errors:** `thiserror` 2.0 domain errors per crate; neutral, cause-named messages; **no silent
   `.ok()`** (explicit lesson from the prior project's chart-rendering bugs).
 

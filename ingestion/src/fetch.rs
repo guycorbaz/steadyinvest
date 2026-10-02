@@ -22,8 +22,15 @@ pub struct FetchedFinancials {
     pub canonical: CanonicalFinancials,
     /// The provider's listing currency of the symbol (EODHD `General.CurrencyCode`) — what the
     /// prices are quoted in; checked against the study's currency before anything is applied
-    /// (FR5 / FR10, project review 2026-10-01). `normalize` does not carry it.
+    /// (FR5 / FR10, project review 2026-10-01). `normalize` does not carry it. For a listing in a
+    /// currency's hundredths it is already the MAJOR currency (`GBX` → `GBP`, see
+    /// [`crate::subunit`]); the provider's own code is in `listing_subunit`.
     pub native_currency: String,
+    /// The provider's listing code when it quoted the symbol in a currency's hundredths (`GBX`,
+    /// `GBp`, `ZAc`, `ILA` — owner decision 2026-10-01): its prices (yearly high / low, latest
+    /// close) were divided by 100 here, before anything read them. `None` = served as is. The
+    /// app records it on the study (traceability, and the price-only refresh's conversion).
+    pub listing_subunit: Option<String>,
     /// The currency the provider REPORTS the statements in, when it differs from the listing's
     /// (a company listed in CHF that reports in USD) — per fiscal year, from the raw amounts; for
     /// a warning that names both currencies. Empty when the statements are in the listing currency.
@@ -158,12 +165,15 @@ pub async fn fetch_canonical(
     api_key: Option<&str>,
 ) -> Result<FetchedFinancials, IngestionError> {
     let RawFetch {
-        financials,
-        latest_price,
+        mut financials,
+        mut latest_price,
         latest_session_date,
         ttm_eps,
         sector,
     } = provider.fetch_fundamentals(ticker, api_key).await?;
+    // Owner decision 2026-10-01: a listing in hundredths (GBX…) has its PRICES converted to the
+    // major unit here — the one place — before `normalize`, the digest or the app read them.
+    let listing_subunit = crate::subunit::convert_prices(&mut financials, &mut latest_price);
     let native_currency = financials.native_currency.clone();
     let reported_currencies = reported_currencies(&financials);
     let canonical = normalize(financials)?;
@@ -171,6 +181,7 @@ pub async fn fetch_canonical(
     Ok(FetchedFinancials {
         canonical,
         native_currency,
+        listing_subunit,
         reported_currencies,
         digest,
         latest_price,
@@ -200,12 +211,33 @@ pub fn reported_currencies(financials: &steadyinvest_core::RawFinancials) -> Vec
 /// Fetch ONLY the latest market price (issue #50) — the holdings price-refresh path. No
 /// `/fundamentals`, no `normalize`, no digest: just the present `/eod` close, so it works on plans
 /// where fundamentals are forbidden but EOD is allowed (the free EODHD tier).
+///
+/// `listing_subunit` (owner decision 2026-10-01): the hundredths code the study fetch recorded for
+/// this symbol (`GBX`…) — a bare `/eod` or `/price` body states no currency, so the caller says
+/// what the last study fetch learned; the close is then converted to the major unit here, by the
+/// same rule as [`fetch_canonical`]. `None` (or any other code) = the close as served.
 pub async fn fetch_price(
     provider: &Provider,
     ticker: &str,
     api_key: Option<&str>,
+    listing_subunit: Option<&str>,
 ) -> Result<Option<DatedClose>, IngestionError> {
-    Ok(provider.fetch_latest_price(ticker, api_key).await?)
+    let dated = provider.fetch_latest_price(ticker, api_key).await?;
+    Ok(price_in_major_unit(dated, listing_subunit))
+}
+
+/// PURE: [`fetch_price`]'s conversion — a close quoted in a known hundredths code becomes the
+/// major unit (÷ 100, exact); one that cannot be stated so is absent, never the raw hundredths.
+fn price_in_major_unit(
+    dated: Option<DatedClose>,
+    listing_subunit: Option<&str>,
+) -> Option<DatedClose> {
+    if !listing_subunit.is_some_and(crate::subunit::is_subunit_listing) {
+        return dated;
+    }
+    dated.and_then(|d| {
+        crate::subunit::from_hundredths(d.close).map(|close| DatedClose { close, ..d })
+    })
 }
 
 /// Fetch the latest BASE→QUOTE exchange rate (Story 6.5, FR28) — the FX sibling of [`fetch_price`],
@@ -594,7 +626,7 @@ mod tests {
                 .with_session_date(Some("2026-07-03")),
         );
         assert_eq!(
-            fetch_price(&ok, "AAPL.US", Some("k")).await.unwrap(),
+            fetch_price(&ok, "AAPL.US", Some("k"), None).await.unwrap(),
             Some(DatedClose {
                 close: price,
                 session_date: Some("2026-07-03".to_string()),
@@ -606,7 +638,7 @@ mod tests {
             Some(price),
         ));
         assert_eq!(
-            fetch_price(&undated, "AAPL.US", Some("k"))
+            fetch_price(&undated, "AAPL.US", Some("k"), None)
                 .await
                 .unwrap()
                 .and_then(|d| d.session_date),
@@ -619,9 +651,91 @@ mod tests {
             Some(price),
         ));
         assert!(matches!(
-            fetch_price(&err, "AAPL.US", None).await.unwrap_err(),
+            fetch_price(&err, "AAPL.US", None, None).await.unwrap_err(),
             IngestionError::Provider(ProviderError::InvalidOrAbsentKey)
         ));
+    }
+
+    // ── Owner decision 2026-10-01 — a listing in hundredths is converted, at the fetch ──
+
+    fn london(code: &str) -> RawFinancials {
+        let amt = |v: &str, c: &str| {
+            Some(RawAmount {
+                value: Decimal::from_str_exact(v).unwrap(),
+                currency: c.into(),
+            })
+        };
+        RawFinancials {
+            native_currency: code.into(),
+            years: vec![RawYear {
+                sales: amt("5000000000", "GBP"),
+                eps: amt("0.45", "GBP"),
+                high_price: amt("1234.5", code),
+                low_price: amt("987", code),
+                ..RawYear::empty(2024)
+            }],
+            splits: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn a_pence_listing_reaches_the_app_in_pounds_with_its_record() {
+        let d = |s: &str| Decimal::from_str_exact(s).unwrap();
+        let provider = Provider::Fake(
+            FakeProvider::returning_with_price(Ok(london("GBX")), Some(d("1250.5")))
+                .with_ttm_eps(Some(d("0.47"))),
+        );
+        let fetched = fetch_canonical(&provider, "ULVR.LSE", Some("k"))
+            .await
+            .unwrap();
+        assert_eq!(fetched.native_currency, "GBP");
+        assert_eq!(fetched.listing_subunit.as_deref(), Some("GBX"));
+        assert_eq!(fetched.latest_price, Some(d("12.505")));
+        assert_eq!(
+            fetched.ttm_eps,
+            Some(d("0.47")),
+            "a fundamental: never divided"
+        );
+        let y = &fetched.canonical.years[0];
+        assert_eq!(y.high_price, Some(d("12.345")));
+        assert_eq!(y.low_price, Some(d("9.87")));
+        assert_eq!(y.eps, Some(d("0.45")));
+        // The statements in pounds are no longer « another currency » than the listing.
+        assert!(fetched.reported_currencies.is_empty());
+
+        // A listing in pounds is served as is, and says so.
+        let pounds = Provider::Fake(FakeProvider::returning_with_price(
+            Ok(london("GBP")),
+            Some(d("12.5")),
+        ));
+        let fetched = fetch_canonical(&pounds, "X.LSE", Some("k")).await.unwrap();
+        assert_eq!(fetched.listing_subunit, None);
+        assert_eq!(fetched.latest_price, Some(d("12.5")));
+        assert_eq!(fetched.canonical.years[0].high_price, Some(d("1234.5")));
+    }
+
+    #[tokio::test]
+    async fn the_price_only_path_converts_on_the_recorded_listing_code() {
+        let d = |s: &str| Decimal::from_str_exact(s).unwrap();
+        let provider = Provider::Fake(
+            FakeProvider::returning_with_price(Ok(raw("100")), Some(d("1250.5")))
+                .with_session_date(Some("2026-09-30")),
+        );
+        for code in ["GBX", "GBp", "ZAc", "ILA"] {
+            let got = fetch_price(&provider, "ULVR.LSE", Some("k"), Some(code))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(got.close, d("12.505"), "{code}");
+            assert_eq!(got.session_date.as_deref(), Some("2026-09-30"));
+        }
+        for code in [None, Some("GBP"), Some("gbx")] {
+            let got = fetch_price(&provider, "ULVR.LSE", Some("k"), code)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(got.close, d("1250.5"), "{code:?}");
+        }
     }
 
     #[test]
