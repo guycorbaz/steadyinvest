@@ -141,6 +141,10 @@ pub struct JournalState {
     /// on every Réglages change: the rails read every user-typed amount through
     /// [`crate::viewmodel::format::parse_decimal`] under it (« 10,5 » under the comma format).
     number_format: NumberFormat,
+    /// The FR23 age horizon of the current price, in trading days (owner decision 2026-10-01),
+    /// pushed by the wiring from app-config at startup and on every Réglages change. Applied on
+    /// every study READ ([`Self::try_get_study`]) with the injected clock's today — never persisted.
+    price_stale_after: u32,
     /// G3 M4: the configured dossier refused AT STARTUP for a named cause (locked by another
     /// instance, protected and too old to be updated…) while the default one stands in — main
     /// keeps app-config pointing at it, so the user's dossier is never forgotten.
@@ -257,6 +261,7 @@ impl JournalState {
                             pending_import: None,
                             active_portfolio_id: None,
                             number_format: NumberFormat::default(),
+                            price_stale_after: steadyinvest_report::price_age::DEFAULT_PRICE_STALE_AFTER_TRADING_DAYS,
                             kept_configured: None,
                         },
                         read_only.map(|cause| read_only_notice(cause).to_string()),
@@ -325,6 +330,8 @@ impl JournalState {
             pending_import: None,
             active_portfolio_id: None,
             number_format: NumberFormat::default(),
+            price_stale_after:
+                steadyinvest_report::price_age::DEFAULT_PRICE_STALE_AFTER_TRADING_DAYS,
             kept_configured: None,
         }
     }
@@ -349,6 +356,8 @@ impl JournalState {
                     pending_import: None,
                     active_portfolio_id: None,
                     number_format: NumberFormat::default(),
+                    price_stale_after:
+                        steadyinvest_report::price_age::DEFAULT_PRICE_STALE_AFTER_TRADING_DAYS,
                     kept_configured: None,
                 },
                 Some(MSG_NO_DATA_DIR.to_string()),
@@ -381,6 +390,8 @@ impl JournalState {
                         pending_import: None,
                         active_portfolio_id: None,
                         number_format: NumberFormat::default(),
+                        price_stale_after:
+                            steadyinvest_report::price_age::DEFAULT_PRICE_STALE_AFTER_TRADING_DAYS,
                         kept_configured: None,
                     },
                     read_only.map(|cause| read_only_notice(cause).to_string()),
@@ -400,6 +411,8 @@ impl JournalState {
                         pending_import: None,
                         active_portfolio_id: None,
                         number_format: NumberFormat::default(),
+                        price_stale_after:
+                            steadyinvest_report::price_age::DEFAULT_PRICE_STALE_AFTER_TRADING_DAYS,
                         kept_configured: None,
                     },
                     Some(open_error(error)),
@@ -422,6 +435,11 @@ impl JournalState {
     /// Set the user's number format the rails read typed amounts under (G1 I).
     pub fn set_number_format(&mut self, format: NumberFormat) {
         self.number_format = format;
+    }
+
+    /// Set the current price's age horizon in trading days (FR23, owner decision 2026-10-01).
+    pub fn set_price_stale_after(&mut self, trading_days: u32) {
+        self.price_stale_after = trading_days;
     }
 
     /// The user's number format (G1 I): the rails' reading of typed amounts, and the spelling of

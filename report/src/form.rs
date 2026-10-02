@@ -158,7 +158,8 @@ pub fn judgment_to_gate_state(value: Option<Money>) -> GateState {
 }
 
 /// The current price → [`GateState`] (Guy's on-screen test 2026-10-01, FR12 / FR23): `None` →
-/// `Missing`; a price whose provider origin was flagged stale by a failed refresh → `Stale` (the
+/// `Missing`; a price whose origin is stale — flagged by a failed refresh, or older than the age
+/// horizon on this read ([`crate::price_age`], marked by the caller's read) — → `Stale` (the
 /// verdict degrades, as for a stale provider cell); otherwise `ValidatedFresh` — a fetched price
 /// is the owner's own gesture (he asked for the fetch), a typed one his own number.
 pub fn price_to_gate_state(
@@ -167,9 +168,7 @@ pub fn price_to_gate_state(
 ) -> GateState {
     match (value, origin) {
         (None, _) => GateState::Missing,
-        (Some(_), Some(o)) if o.freshness == steadyinvest_contract::Freshness::Stale => {
-            GateState::Stale
-        }
+        (Some(_), Some(o)) if o.is_stale() => GateState::Stale,
         (Some(_), _) => GateState::ValidatedFresh,
     }
 }
@@ -393,7 +392,7 @@ pub fn frozen_inputs(study: &Study, series: &[CanonicalYear]) -> BTreeMap<String
 pub const ABSENT: &str = "absent";
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use steadyinvest_contract::{
         Cell, Coverage, Freshness, Money, Provenance, Review, Source, Timestamp, YearData,
@@ -423,7 +422,7 @@ mod tests {
         }
     }
 
-    fn full_study() -> Study {
+    pub(crate) fn full_study() -> Study {
         let judgment = Judgment {
             ai_placed: Default::default(),
             current_price_origin: None,
@@ -521,6 +520,7 @@ mod tests {
             at: Timestamp("2026-10-01T09:00:00Z".to_string()),
             session_date: None,
             freshness,
+            aged: false,
         };
         assert_eq!(price_to_gate_state(None, None), GateState::Missing);
         assert_eq!(
@@ -545,5 +545,12 @@ mod tests {
             GateState::Missing,
             "no price: missing whatever its stale origin says"
         );
+        // FR23 age horizon (2026-10-01): an origin the read marked aged is stale too, whatever
+        // its source — a typed price ages like a fetched one.
+        let aged = PriceOrigin {
+            aged: true,
+            ..o(Source::Manual, Freshness::Current)
+        };
+        assert_eq!(price_to_gate_state(price, Some(&aged)), GateState::Stale);
     }
 }

@@ -418,6 +418,8 @@ pub struct CallEnv<'a> {
     pub now: &'a dyn Fn() -> Timestamp,
     pub new_id: &'a dyn Fn() -> Uuid,
     pub cancelled: &'a dyn Fn() -> bool,
+    /// The current price's age horizon in trading days (FR23), from the app-config.
+    pub price_stale_after: u32,
 }
 
 fn error_body(r: &Rendered, dossier: Option<&DossierIdentity>, resolved: Option<&Path>) -> Value {
@@ -580,7 +582,7 @@ fn call_on(
                 (id, McpRead::Study(read)) => Ok(ok(
                     &id,
                     if tool == "get_study" {
-                        dto::study_read(&read)
+                        dto::study_read(&read, &(env.now)(), env.price_stale_after)
                     } else {
                         dto::notes(&read)
                     },

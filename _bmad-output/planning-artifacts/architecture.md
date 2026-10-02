@@ -468,8 +468,12 @@ against this skeleton as the principal go/no-go before committing UI work.
   PR #274, #276, #277): the current price records its origin (`Judgment.current_price_origin`:
   provider + session date, or owner-typed + date); a failed refresh flags a fetched price stale and
   the verdict becomes provisional (« Prix actuel — périmé ») until a successful refresh — a price is
-  stale only after a failure, never by age. **Décision en attente (Guy) : horizon d'âge du cours
-  (FR23, « un jour de bourse » par défaut, réglable) — non implémenté.** An unknown symbol's notice
+  stale after a failure, or by age (réconcilié 2026-10-01 : décision Guy, horizon d'âge du cours):
+  past `AppConfig.price_stale_after_trading_days` trading days (Monday–Friday, default 1) counted from
+  the session date (else the fetch or typing date), `report::price_age` marks the **read copy**
+  (`PriceOrigin::aged`, `#[serde(skip)]` — never persisted, so a changed horizon applies on the next
+  read) in `JournalState::try_get_study` and in the MCP `get_study`; `PriceOrigin::is_stale()` is the
+  one test the verdict, the traceability and the PDF use. An unknown symbol's notice
   names the app's ticker convention (`.DE` → `.XETRA`, `.AX` → `.AU`; `ingestion::ticker`). A
   provider listing currency different from the study's is **refused** before anything is applied,
   as is a listing quoted in hundredths (GBX, GBp, ZAc, ILA); statements reported in another

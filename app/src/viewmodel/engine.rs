@@ -873,9 +873,10 @@ fn trace_date(stamp: &str) -> String {
 
 /// The current price's traceability line (Guy's on-screen test 2026-10-01, FR11): its real
 /// origin — the provider with its session date (or fetch date), the owner's typing, or unknown —
-/// and « périmé » after a failed refresh. Never « manuel » for a fetched price.
+/// and « périmé » after a failed refresh or past the age horizon (FR23, marked at read time —
+/// `report::price_age`). Never « manuel » for a fetched price.
 fn trace_price(j: &steadyinvest_contract::Judgment, format: NumberFormat) -> String {
-    use steadyinvest_contract::{Freshness, Source};
+    use steadyinvest_contract::Source;
     let shown = match j.current_price {
         Some(m) => format_scaled(m.as_decimal(), DisplayField::Price, format),
         None => return format!("{LBL_CURRENT_PRICE} : {EMPTY_SLOT}"),
@@ -894,7 +895,7 @@ fn trace_price(j: &steadyinvest_contract::Judgment, format: NumberFormat) -> Str
                 // A price is never derived — never passed off as typed either (G3 review).
                 (Source::Derived, _) => TRACE_ORIGIN_UNKNOWN.to_string(),
             };
-            if o.freshness == Freshness::Stale {
+            if o.is_stale() {
                 format!("{base} — {GATE_STALE}")
             } else {
                 base
@@ -2208,6 +2209,7 @@ mod tests {
             at: at.clone(),
             session_date: session.map(str::to_string),
             freshness,
+            aged: false,
         };
         j.current_price_origin = Some(o(Source::Provider, Some("2026-09-30"), Freshness::Current));
         assert_eq!(

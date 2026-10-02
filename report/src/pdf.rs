@@ -1421,9 +1421,11 @@ fn jj_mm_aaaa(ts: &str) -> String {
 }
 
 /// FR11 (2026-10-01): « Origine du cours actuel : fournisseur, séance du JJ/MM/AAAA » (or the fetch
-/// date), « manuel, saisi le … », « — périmé » after a failed refresh; `None` when not recorded.
+/// date), « manuel, saisi le … », « — périmé » after a failed refresh or past the age horizon
+/// (FR23 — the caller renders a study read through `price_age::apply_price_age`); `None` when not
+/// recorded.
 fn price_origin_line(study: &Study) -> Option<String> {
-    use steadyinvest_contract::{Freshness, Source};
+    use steadyinvest_contract::Source;
     study.judgment.current_price?;
     let o = study.judgment.current_price_origin.as_ref()?;
     let what = match (o.source, &o.session_date) {
@@ -1432,11 +1434,7 @@ fn price_origin_line(study: &Study) -> Option<String> {
         (Source::Manual, _) => PRICE_TYPED_ON.replace("{}", &jj_mm_aaaa(&o.at.0)),
         (Source::Derived, _) => return None,
     };
-    let stale = if o.freshness == Freshness::Stale {
-        PRICE_STALE
-    } else {
-        ""
-    };
+    let stale = if o.is_stale() { PRICE_STALE } else { "" };
     Some(format!("{PRICE_ORIGIN} {what}{stale}"))
 }
 const PRICE_ORIGIN: &str = "Origine du cours actuel :";
@@ -5253,6 +5251,7 @@ mod tests {
             at: Timestamp("2026-10-01T09:00:00Z".to_string()),
             session_date: Some("2026-09-30".to_string()),
             freshness: Freshness::Stale,
+            aged: false,
         });
         let bytes = render_study_pdf(&study, NumberStyle::Comma).unwrap();
         assert!(contains(
@@ -5264,6 +5263,7 @@ mod tests {
             at: Timestamp("2026-10-01T09:00:00Z".to_string()),
             session_date: None,
             freshness: Freshness::Current,
+            aged: false,
         });
         let bytes = render_study_pdf(&study, NumberStyle::Comma).unwrap();
         assert!(contains(

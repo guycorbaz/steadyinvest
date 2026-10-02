@@ -802,8 +802,11 @@ mod tests {
         // FR50 (project review 2026-10-01): the confrontation says where its band comes from — the
         // title's « actuelle » form and three basis lines replace « Décision du {} »: 1170 − 1 + 4
         // = 1173, measured.
+        // FR23 age horizon (owner decision 2026-10-01): the Réglages panel « Cours périmé après
+        // (jours de bourse) » — title, placeholder, « Enregistrer », explanation (4). Measured
+        // 1182: main already scanned 1178 (the floor had lagged by 5), + 4.
         assert!(
-            total >= 1173,
+            total >= 1182,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -1019,8 +1022,10 @@ mod tests {
             // examination's wording and a listing in hundredths (MSG_CURRENCY_CHOSEN_MISMATCH,
             // MSG_CURRENCY_SUBUNIT): 258 + 2 = 260, measured.
             // G3 catch-up of #267–#270: a year with only divergences left (MSG_YEAR_ONLY_LEFT):
-            // 260 + 1 = 261, measured.
-            261,
+            // 260 + 1 = 261, measured. FR23 age horizon (owner decision 2026-10-01): the Réglages
+            // refusal of an invalid horizon (MSG_PRICE_STALE_AFTER_INVALID): 261 + 1 = 262,
+            // measured.
+            262,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured. The G1 final review of the study PDF export

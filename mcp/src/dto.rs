@@ -9,7 +9,7 @@
 
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
-use steadyinvest_contract::Study;
+use steadyinvest_contract::{Study, Timestamp};
 use steadyinvest_core::ssg::{CriterionFact, UpsideDownside, Zone};
 use steadyinvest_core::verdict::{GateState, GatedInput, StudySnapshot, Verdict};
 use steadyinvest_persistence::{
@@ -137,15 +137,23 @@ fn study_json(study: &Study) -> Value {
 }
 
 /// `get_study`: the study, its status and its computed outputs. A study the engine cannot
-/// normalize still returns its data, with `computed: null` and the reason.
-pub fn study_read(read: &McpStudyRead) -> Value {
+/// normalize still returns its data, with `computed: null` and the reason. The current price is
+/// aged on `now`'s day with the owner's horizon (FR23) before the verdict is computed — the same
+/// read-time rule as the app (`report::price_age`; the mark is never serialized).
+pub fn study_read(read: &McpStudyRead, now: &Timestamp, price_stale_after: u32) -> Value {
+    let mut study = read.study.clone();
+    steadyinvest_report::price_age::apply_price_age(
+        &mut study,
+        steadyinvest_report::price_age::Day::of(now),
+        price_stale_after,
+    );
     let mut v = json!({
         "status": read.status,
-        "study": study_json(&read.study),
+        "study": study_json(&study),
     });
-    match steadyinvest_report::form::build_snapshot(&read.study) {
+    match steadyinvest_report::form::build_snapshot(&study) {
         Ok(snapshot) => {
-            v["computed"] = computed(&snapshot, &read.study);
+            v["computed"] = computed(&snapshot, &study);
         }
         Err(e) => {
             v["computed"] = Value::Null;
@@ -353,10 +361,45 @@ mod tests {
             study,
             status: "active".to_string(),
         };
-        let v = study_read(&read);
+        let v = study_read(&read, &Timestamp("2026-10-01T10:00:00Z".to_string()), 1);
         assert_eq!(v["computed"], Value::Null);
         assert!(v["computed_unavailable"].is_string(), "{v}");
         assert_eq!(v["study"]["security_ticker"], json!("NESN"));
+    }
+
+    // FR23 age horizon (owner decision 2026-10-01): the AI's live verdict ages the price like the
+    // app's — provisional past the horizon, full within it; the mark never reaches the study JSON.
+    #[test]
+    fn the_live_verdict_ages_the_price_with_the_owners_horizon() {
+        let mut study = full_study();
+        study.judgment.current_price_origin = Some(steadyinvest_contract::PriceOrigin {
+            source: Source::Provider,
+            at: Timestamp("2026-10-02T20:00:00Z".to_string()),
+            session_date: Some("2026-10-02".to_string()), // a Friday
+            freshness: Freshness::Current,
+            aged: false,
+        });
+        let read = McpStudyRead {
+            study,
+            status: "active".to_string(),
+        };
+        let monday = Timestamp("2026-10-05T09:00:00Z".to_string());
+        let tuesday = Timestamp("2026-10-06T09:00:00Z".to_string());
+        assert_eq!(
+            study_read(&read, &monday, 1)["computed"]["verdict_state"],
+            json!("full")
+        );
+        let aged = study_read(&read, &tuesday, 1);
+        assert_eq!(
+            aged["computed"]["verdict_state"],
+            json!("provisional"),
+            "{aged}"
+        );
+        assert!(!aged["study"].to_string().contains("aged"));
+        assert_eq!(
+            study_read(&read, &tuesday, 2)["computed"]["verdict_state"],
+            json!("full")
+        );
     }
 
     // Project review 2026-10-01: the AI reads the flags the owner sees — one high-P/E flag — and

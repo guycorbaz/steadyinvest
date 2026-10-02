@@ -90,6 +90,12 @@ impl ServerHandler for SteadyMcp {
                 now: &now,
                 new_id: &Uuid::new_v4,
                 cancelled: &cancelled,
+                // FR23: the live verdict ages the price like the app (the owner's horizon).
+                price_stale_after: steadyinvest_report::price_age::horizon_or_default(
+                    steadyinvest_paths::config_file_path()
+                        .and_then(|config| steadyinvest_paths::read_price_stale_after(&config))
+                        .as_deref(),
+                ),
             };
             tools::call(&name, arguments, &env)
         })

@@ -631,6 +631,9 @@ pub const MSG_CONCENTRATION_INVALID: &str =
 /// and the field returns to the effective value (no longer a silent swallow). Fact-stating (posture).
 pub const MSG_TRAILING_STOP_INVALID: &str =
     "Le seuil suiveur doit être un pourcentage entre 0 et 100 ; le réglage n'a pas changé.";
+/// FR23 (owner decision 2026-10-01): the price age horizon was not a whole number of trading days
+/// from 1 to 260 — the setting is unchanged. Fact-stating (posture).
+pub const MSG_PRICE_STALE_AFTER_INVALID: &str = "Le délai avant qu'un cours soit périmé doit être un nombre entier de jours de bourse, de 1 à 260 ; le réglage n'a pas changé.";
 /// Issue #88: the default dividend-withholding rate was not a valid percent — the setting is unchanged
 /// and the field returns to the effective value (no longer a silent swallow). Fact-stating (posture).
 pub const MSG_WITHHOLDING_INVALID: &str =
@@ -1488,6 +1491,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_CONCENTRATION_INVALID,
     MSG_TRAILING_STOP_INVALID,
     MSG_WITHHOLDING_INVALID,
+    MSG_PRICE_STALE_AFTER_INVALID,
     MSG_SIZE_FIELD_INVALID,
     MSG_SIZE_FIELD_AMBIGUOUS,
     MSG_SIZE_PAIR_CROSSED,

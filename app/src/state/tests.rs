@@ -10983,6 +10983,7 @@ mod price_origin {
                 at: Timestamp(NOW.to_string()),
                 session_date: Some("2026-09-30".to_string()),
                 freshness: Freshness::Current,
+                aged: false,
             })
         );
         // The holdings price refresh does the same, without a session date when none is given.
@@ -11159,6 +11160,59 @@ mod price_origin {
             .unwrap();
         state.mark_provider_stale(id).unwrap();
         assert_eq!(origin(&state, id).unwrap().freshness, Freshness::Current);
+    }
+
+    /// Move the price's origin back to `at` (and its session date to `session`).
+    fn dated(state: &mut JournalState, id: Uuid, at: &str, session: Option<&str>) {
+        let at = Timestamp(at.to_string());
+        let session = session.map(str::to_string);
+        state
+            .mutate_study(id, move |s| {
+                let o = s.judgment.current_price_origin.as_mut().unwrap();
+                o.at = at;
+                o.session_date = session;
+            })
+            .unwrap();
+    }
+
+    // FR23 age horizon (owner decision 2026-10-01): past N trading days a price is « périmé » on
+    // every read — the verdict provisional — without any flag written; a wider horizon un-ages it.
+    #[test]
+    fn a_price_past_the_age_horizon_is_stale_on_read_and_nothing_is_persisted() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0xA1, NOW); // NOW: Thursday 2026-10-01
+        let id = state.create_study("NESN", "CHF").unwrap();
+        state
+            .apply_provider_refresh(id, &fetched_with_price(&YEARS, 60))
+            .unwrap();
+        ready(&mut state, id);
+        // Wednesday's close on Thursday: one trading day old — current.
+        dated(&mut state, id, "2026-09-30T20:00:00Z", Some("2026-09-30"));
+        assert_eq!(verdict_open(&state, id), None, "within the horizon: Full");
+        // Tuesday's close (fetched on Wednesday): the session date counts — two trading days.
+        dated(&mut state, id, "2026-09-30T08:00:00Z", Some("2026-09-29"));
+        let o = origin(&state, id).unwrap();
+        assert!(o.aged && o.is_stale(), "{o:?}");
+        assert_eq!(o.freshness, Freshness::Current, "no flag written");
+        let open = verdict_open(&state, id).expect("no longer Full");
+        assert!(open.contains("Prix actuel — périmé"), "{open}");
+        // The dossier holds no age: the export carries no trace of it.
+        let exported = state.export_study(id).unwrap();
+        assert!(!exported.contains("aged"), "{exported}");
+        // The owner widens the horizon: the next read is Full again.
+        state.set_price_stale_after(2);
+        assert!(!origin(&state, id).unwrap().aged);
+        assert_eq!(verdict_open(&state, id), None, "a wider horizon: Full");
+        // A typed price ages too, from the day it was typed.
+        state.set_price_stale_after(1);
+        state
+            .set_judgment_field(id, "current_price", Some(und_money(58)))
+            .unwrap();
+        assert_eq!(verdict_open(&state, id), None, "typed today: Full");
+        dated(&mut state, id, "2026-09-26T10:00:00Z", None); // a Saturday: Mon–Thu = 4 days
+        assert!(origin(&state, id).unwrap().aged);
+        state.set_price_stale_after(4);
+        assert!(!origin(&state, id).unwrap().aged);
     }
 }
 

@@ -153,6 +153,23 @@ impl std::fmt::Display for ResolveError {
 
 impl std::error::Error for ResolveError {}
 
+/// The app-config's **price age horizon** setting (FR23, owner decision 2026-10-01), as stored —
+/// the MCP server reads it so its live verdict ages the current price exactly like the app's.
+/// `None` when there is no file, no such field, or the file cannot be read or parsed (the caller
+/// then applies the default — the setting is a horizon, not a pointer: nothing is guessed about
+/// the dossier). Never writes anything.
+pub fn read_price_stale_after(path: &Path) -> Option<String> {
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct PriceAgeSetting {
+        price_stale_after_trading_days: Option<String>,
+    }
+    let raw = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str::<PriceAgeSetting>(&raw)
+        .ok()?
+        .price_stale_after_trading_days
+}
+
 /// The MCP server's dossier for one call (arch A10, owner decisions O3 / D10): `explicit` (the
 /// `--dossier` argument) when given; else the app-config's `last_opened_path` (the dossier the
 /// owner sees); else its `journal_path`; else the app's default dossier path. An unreadable
@@ -195,6 +212,19 @@ mod tests {
 
     fn p(s: &str) -> PathBuf {
         PathBuf::from(s)
+    }
+
+    #[test]
+    fn the_price_age_setting_is_read_when_present_and_absent_otherwise() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config.json");
+        assert_eq!(read_price_stale_after(&config), None, "no file");
+        std::fs::write(&config, r#"{ "theme": "light" }"#).unwrap();
+        assert_eq!(read_price_stale_after(&config), None, "no field");
+        std::fs::write(&config, r#"{ "price_stale_after_trading_days": "3" }"#).unwrap();
+        assert_eq!(read_price_stale_after(&config).as_deref(), Some("3"));
+        std::fs::write(&config, "{ not json").unwrap();
+        assert_eq!(read_price_stale_after(&config), None, "unparseable");
     }
 
     #[test]

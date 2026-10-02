@@ -447,6 +447,7 @@ fn set_provider_price(
         at: at.clone(),
         session_date,
         freshness: Freshness::Current,
+        aged: false,
     });
 }
 

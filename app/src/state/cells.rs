@@ -538,6 +538,7 @@ impl JournalState {
                             at: now.clone(),
                             session_date: None,
                             freshness: Freshness::Current,
+                            aged: false,
                         });
             }
             known

@@ -77,6 +77,8 @@ editHistory:
     changes: "G2 round 3 (G3 review of PR #255, owner decisions D1–D10; D11 FR68 decision time = explicit « Valider l'étude » on a full verdict, differences highlighted, delivered in Story 8.8): draft study carries a proposed currency and optional name, duplicates keyed by identifier + currency, validation through the prefilled create dialog (FR70); one pending draft per target, provider market facts not draftable, missing target not validatable (FR72); `?` in every case, validation undoable and recorded (FR74, FR77); older builds refuse exports carrying notes/AI marks/drafts (FR60); dossier identity is not configuration (NFR-S4, Appendix A); CLI/AI façade wording updated"
   - date: '2026-10-01'
     changes: "H3 text reconciliation (Epic 8 retro action H3, widened by the 2026-10-01 project review, revue-projet-2026-10-01/p1-*.md and p2-ecarts-textes.md): the text now states what main does, each changed passage tagged « réconcilié 2026-10-01 ». FR20 + Journey 2b + scope (a divergent refresh freezes a ✓ cell, provider value parked — issue #110 / PR #123); FR33 [P1] (app-side dimmed seeds and « hist. » chips — issue #121 / PR #137); FR68 (current verdict always live, difference shown on any change, no FX in a study verdict — D11 / A13 / story 8.8 decision 1; [P4] label); FR60 (the G2 round-3 entry above is corrected: an older build refuses only the drafts table, it silently drops notes, AI marks and the frozen verdict — D9 withdrawn, story 8.1); FR41 + Appendix A (one default withholding rate, configurable, per-entry override — story 6.4); FR3 (projection window, 5-year horizon — story 2.11); FR28 (the rate's date is its freshness state — story 6.6); FR62 (help = glossary hub in Réglages; demo reachable from the study list — story 2.13, PR #279/#284); FR67 (sync folder: warning + recommendation, manual backups — story 5.5); FR5/FR10/FR12/FR23/FR50/FR63 updated for the fixes of PRs #274–#286 (listing-currency refusal, stale fetched price degrades the verdict, confrontation from the frozen band, zone nouns follow the label set). Owner decisions still open are marked « Décision en attente (Guy) » (price age horizon, mixed statement currency, GBX, comparison/PDF neutral wording, confrontation re-validation date) — not decided here. Earlier entries kept unchanged."
+  - date: '2026-10-01'
+    changes: "FR23 + Appendix A: the price age horizon is implemented (owner decision Guy 2026-10-01) — a current price, fetched or typed, older than N trading days (Monday–Friday, default 1, set in Réglages) is stale and the verdict provisional; computed at read time, never stored. Tagged « réconcilié 2026-10-01 »."
 ---
 
 # Product Requirements Document - steadyinvest
@@ -812,9 +814,10 @@ withholding-refund tracking, export/share, eventual public release.
   manual value.
 - FR23 **[P1]:** On provider failure, last-known values are retained and affected data is flagged
   **stale/to-update** — including a fetched current price (not one written the same day); a
-  successful refresh clears the flag (réconcilié 2026-10-01 : PR #274). Data becomes stale only on a
-  failed refresh: the age horizon of Appendix A is not implemented. Décision en attente (Guy) :
-  seuil d'âge du cours (« un jour de bourse » par défaut, réglable) — à implémenter ou à retirer.
+  successful refresh clears the flag (réconcilié 2026-10-01 : PR #274). The current price is also
+  stale once older than the age horizon of Appendix A — one trading day by default, set in Réglages
+  (« Cours périmé après (jours de bourse) »); the age is computed when the study is read, never
+  stored (réconcilié 2026-10-01 : décision Guy, horizon d'âge du cours).
 - FR24 **[P1]:** A provider failure's **cause** (network, quota/rate-limit, invalid/absent key) is
   recorded and reported.
 - FR25 **[P1]:** The user can use keyless providers, and **add/replace/delete/test** a provider API key
@@ -1134,8 +1137,11 @@ withholding-refund tracking, export/share, eventual public release.
   35%), configurable in Réglages and overridable per entry; per-jurisdiction rate tables out of scope
   (réconcilié 2026-10-01 : story 6.4); study uses gross.
 - **Stale threshold (FR23):** price data older than the user-configured horizon (default: older than
-  one trading day) is flagged stale. Décision en attente (Guy) : ce seuil d'âge n'est pas implémenté
-  — aujourd'hui seul un rafraîchissement en échec rend un cours périmé (PR #274).
+  one trading day) is flagged stale (réconcilié 2026-10-01 : décision Guy). As built: the horizon is a
+  whole number of trading days (Monday–Friday, no holiday calendar; 1–260, default 1) in Réglages; the
+  price's date is the provider's session date, else the date it was fetched or typed — a typed price
+  ages too; a price older than the horizon is « périmé » and the verdict provisional, exactly as after
+  a failed refresh (PR #274), on screen, in the PDF and in the MCP `get_study` verdict.
 - **Neutrality (FR13):** app-generated signals contain **no imperative action verb** (buy/sell/
   hold as a command); they state facts only. (Exact banned-verb list finalized in Architecture.)
   Scope rule: AI-origin text is outside the banned-verb gate; it is always shown inside a frame

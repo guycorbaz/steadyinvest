@@ -317,9 +317,11 @@ and not stale.
 
 `current_price` carries its origin (provider + session date, or typed + date); a fetched price
 becomes stale when a later refresh fails, which makes the verdict provisional (« Prix actuel —
-périmé ») until the next successful refresh; a typed price is never flagged (réconcilié 2026-10-01 :
-PR #274). Décision en attente (Guy) : horizon d'âge du cours (PRD Appendix A : « un jour de bourse »
-par défaut, réglable) — non implémenté ; seul l'échec d'un rafraîchissement rend le cours périmé.
+périmé ») until the next successful refresh (réconcilié 2026-10-01 : PR #274). Any current price,
+fetched or typed, is also stale once older than the age horizon — a whole number of trading days
+(Monday–Friday, no holiday calendar), one by default, set in Réglages — counted from its session date,
+else the date it was fetched or typed; the age is computed at read time, never stored (réconcilié
+2026-10-01 : décision Guy, horizon d'âge du cours).
 
 ## 6. Banned-verb list (FR13) — posture gate
 
