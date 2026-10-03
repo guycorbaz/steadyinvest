@@ -161,10 +161,10 @@ pub fn judgment_to_gate_state(value: Option<Money>) -> GateState {
 /// `Missing`; a price whose origin is stale — flagged by a failed refresh, or older than the age
 /// horizon on this read ([`crate::price_age`], marked by the caller's read) — → `Stale` (the
 /// verdict degrades, as for a stale provider cell); a price with **no recorded origin** (written
-/// before origins were recorded) has an unknown date → `Stale` too (owner decision C, Guy
-/// 2026-10-03 — its open gate is named « date inconnue », apart from « périmé »:
-/// [`crate::price_age::PriceAge::UnknownDate`]); otherwise `ValidatedFresh` — a fetched price
-/// is the owner's own gesture (he asked for the fetch), a typed one his own number.
+/// before origins were recorded), or whose date cannot be read, has an unknown date → `Stale` too
+/// (owner decision C, Guy 2026-10-03 — its open gate is named « date inconnue », apart from
+/// « périmé »: [`crate::price_age::PriceAge::UnknownDate`]); otherwise `ValidatedFresh` — a
+/// fetched price is the owner's own gesture (he asked for the fetch), a typed one his own number.
 pub fn price_to_gate_state(
     value: Option<Money>,
     origin: Option<&steadyinvest_contract::PriceOrigin>,
@@ -172,8 +172,10 @@ pub fn price_to_gate_state(
     match (value, origin) {
         (None, _) => GateState::Missing,
         (Some(_), Some(o)) if o.is_stale() => GateState::Stale,
-        // No recorded origin: the price's date is unknown — stale (decision C, 2026-10-03).
+        // No recorded origin, or one whose date cannot be read: the price's date is unknown —
+        // stale (decision C, 2026-10-03).
         (Some(_), None) => GateState::Stale,
+        (Some(_), Some(o)) if !crate::price_age::price_date_known(o) => GateState::Stale,
         (Some(_), Some(_)) => GateState::ValidatedFresh,
     }
 }

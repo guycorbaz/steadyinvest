@@ -1117,8 +1117,9 @@ mod tests {
             // strings — the study PDF and the quick screen print it too): 38 − 1 = 37, measured.
             // FR23 owner decision C (2026-10-03, PR #293): a current price with no recorded origin
             // is « date inconnue » (GATE_UNKNOWN_DATE): merged with PR #291 on main, 37 + 1 = 38,
-            // measured.
-            38,
+            // measured. An origin whose date cannot be read is « date inconnue » too, its source
+            // named (TRACE_PRICE_PROVIDER, « fournisseur »): 38 + 1 = 39, measured.
+            39,
             "engine.rs label inventory changed — register the new label"
         );
     }

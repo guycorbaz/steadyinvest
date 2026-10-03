@@ -85,6 +85,8 @@ editHistory:
     changes: "Owner decision 2026-10-01 (« les quotations doivent être de vraies valeurs ») reconciled, PR #291 and its review: the GBX item of the 2026-10-01 entry's open decisions is DECIDED — listings quoted in a currency's hundredths (GBX, GBp, ZAc, ILA) are converted to the major currency at the fetch, no longer refused (FR5, réconcilié 2026-10-01). Method spec §3 and architecture state the holdings price-only rule (converted when the unit is known; refused, named, nothing applied when unknown on a hundredths venue) and the statements / trailing EPS unit, vérifié 2026-10-03 sur ULVR.LSE (the one real fetch the owner authorised): prices in pence (GBX), trailing EPS in GBP, statements in EUR — never divided; a London listing reporting in a third currency falls under the existing mixed-currency warning (FR5, réconcilié 2026-10-03 : revue PR #291). Earlier entries kept unchanged."
   - date: '2026-10-03'
     changes: "Owner decisions on PR #293 (Guy 2026-10-03): FR12 + Appendix A — a current price with no recorded origin has an unknown date and counts as stale (« Prix actuel — date inconnue », traceability, PDF, MCP `computed.price_age`); the trading day is counted in local time; no holiday calendar, limitation accepted. The « Décision en attente (Guy) » on these points is replaced by the decided rule, tagged « réconcilié 2026-10-03 »."
+  - date: '2026-10-03'
+    changes: "PR #293 brought up to date with main (PR #289, PR #291), then decisions C and D carried to the shown dates: Appendix A — an origin whose date cannot be read counts as an unknown date (« date inconnue », stale, its source named), and the date shown for a price origin in the traceability and the study PDF is the local day the age counts from (« séance du … » stays the provider's date). Tagged « réconcilié 2026-10-03 »."
 ---
 
 # Product Requirements Document - steadyinvest
@@ -1173,7 +1175,11 @@ withholding-refund tracking, export/share, eventual public release.
   « périmé »), the traceability and the study PDF saying its date is unknown, the MCP `get_study`
   `computed.price_age` = `"unknown"` (else `"fresh"` / `"aged"`) with `price_aged` true; retyping
   or fetching the price records its origin and makes it fresh; a study with no current price is
-  unchanged (missing input). The absence of a holiday calendar is an accepted limitation.
+  unchanged (missing input). The absence of a holiday calendar is an accepted limitation. An origin
+  whose date cannot be read counts as an unknown date the same way (« date inconnue », stale, its
+  source still named), and the date shown for an origin (« récupéré le … », « saisi le … ») is the
+  local day the age is counted from, so the shown day never contradicts the age; a provider's
+  « séance du … » is its own date (réconcilié 2026-10-03 : décisions Guy C et D, PR #293).
 - **Neutrality (FR13):** app-generated signals contain **no imperative action verb** (buy/sell/
   hold as a command); they state facts only. (Exact banned-verb list finalized in Architecture.)
   Scope rule: AI-origin text is outside the banned-verb gate; it is always shown inside a frame

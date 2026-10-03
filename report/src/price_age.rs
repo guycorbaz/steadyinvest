@@ -19,11 +19,16 @@
 //! - its **age** is the number of trading days (Monday–Friday, no holiday calendar) after that
 //!   date up to and including today — a Friday close is 1 trading day old on the Monday, 2 on the
 //!   Tuesday;
-//! - it is **aged** when that age exceeds the horizon. An unreadable date is never called aged;
-//! - a present price with **no recorded origin** (written before origins were recorded) has an
+//! - it is **aged** when that age exceeds the horizon;
+//! - a present price with **no recorded origin** (written before origins were recorded) — or with
+//!   an origin whose **date cannot be read** ([`price_date_known`]), treated the same way — has an
 //!   **unknown date** ([`PriceAge::UnknownDate`]): it counts as stale (the verdict gate
 //!   `form::price_to_gate_state`), named « date inconnue » apart from « périmé »; writing a price
-//!   again — retyped or fetched — records an origin and makes it fresh ([`same_price_renews`]).
+//!   again — retyped or fetched — records a readable origin and makes it fresh
+//!   ([`same_price_renews`]);
+//! - the date **shown** for a price's origin (« récupéré le … », « saisi le … » — traceability,
+//!   study PDF) is that same day, read in the same zone ([`price_date_shown`]), so the shown day
+//!   never contradicts the age. A provider's session date (« séance du … ») is shown as given.
 //!
 //! There is no exchange-holiday calendar (accepted limitation): after a holiday, the last close
 //! counts as one trading day older than it is, so with the default horizon it is « périmé » until
@@ -66,6 +71,16 @@ impl Day {
             i64::from(d.month()),
             i64::from(d.day()),
         ))
+    }
+
+    /// `JJ/MM/AAAA` — the day as the traceability and the study PDF print it.
+    pub fn jj_mm_aaaa(self) -> String {
+        // 719 163 = days from 0001-01-01 (CE day 1) to 1970-01-01.
+        i32::try_from(self.0 + 719_163)
+            .ok()
+            .and_then(chrono::NaiveDate::from_num_days_from_ce_opt)
+            .map(|d| d.format("%d/%m/%Y").to_string())
+            .unwrap_or_default()
     }
 
     /// Saturday or Sunday.
@@ -167,6 +182,22 @@ pub fn price_day(origin: &PriceOrigin, zone: DayZone) -> Option<Day> {
     }
 }
 
+/// Can the date this origin stands for be read at all ([`price_day`])? An unreadable one (a
+/// malformed stamp or session date, or a `Derived` origin a price never has) is an **unknown
+/// date**, exactly like a missing origin: stale, « date inconnue » (owner decision C, Guy
+/// 2026-10-03). Readability is a property of the stamp, not of the zone — read in UTC here.
+pub fn price_date_known(origin: &PriceOrigin) -> bool {
+    price_day(origin, DayZone::UTC).is_some()
+}
+
+/// The date shown for a price's origin, `JJ/MM/AAAA`: THE day the age is counted from
+/// ([`price_day`] in `zone` — the provider's session date as given, else the **local** day the
+/// price was written), so « saisi le … » / « récupéré le … » never contradicts the age (owner
+/// decision D, Guy 2026-10-03). `None` when the date cannot be read (« date inconnue »).
+pub fn price_date_shown(origin: &PriceOrigin, zone: DayZone) -> Option<String> {
+    price_day(origin, zone).map(Day::jj_mm_aaaa)
+}
+
 /// Is a price of this origin older than `horizon` trading days on `today`? PURE.
 pub fn price_is_aged(origin: &PriceOrigin, today: Day, horizon: u32, zone: DayZone) -> bool {
     price_day(origin, zone).is_some_and(|day| trading_days_after(day, today, horizon) > horizon)
@@ -176,12 +207,13 @@ pub fn price_is_aged(origin: &PriceOrigin, today: Day, horizon: u32, zone: DayZo
 /// 2026-10-03): `None` when there is no current price (the missing-input path, unchanged).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PriceAge {
-    /// Within the horizon (or its date unreadable — never called aged).
+    /// Within the horizon.
     Fresh,
     /// Past the horizon on this read (« périmé »).
     Aged,
-    /// No recorded origin — written before origins were recorded: its date is unknown, and it
-    /// counts as stale (« date inconnue »), distinct from « périmé ».
+    /// No recorded origin — written before origins were recorded — or an origin whose date cannot
+    /// be read ([`price_date_known`]): its date is unknown, and it counts as stale
+    /// (« date inconnue »), distinct from « périmé ».
     UnknownDate,
 }
 
@@ -191,6 +223,7 @@ pub fn current_price_age(judgment: &Judgment) -> Option<PriceAge> {
     judgment.current_price?;
     Some(match &judgment.current_price_origin {
         None => PriceAge::UnknownDate,
+        Some(o) if !price_date_known(o) => PriceAge::UnknownDate,
         Some(o) if o.aged => PriceAge::Aged,
         Some(_) => PriceAge::Fresh,
     })
@@ -201,20 +234,20 @@ pub fn current_price_age(judgment: &Judgment) -> Option<PriceAge> {
 /// — the age computation's own reading), so a confirmed price becomes fresh again: the owner
 /// retyping the same value on a later day, or a fetch on a later day bringing the same quote
 /// without a session date. The same day — or the same provider session — stays a no-op (no undo
-/// step, no history entry). An unknown recorded origin (date unknown, so stale) always renews: the
-/// write records an origin (owner decision C, 2026-10-03). An unreadable recorded date never
-/// renews (it never aged either).
+/// step, no history entry). An unknown recorded date — no origin, or one whose date cannot be
+/// read (stale either way) — always renews when the write's own date is readable: the write
+/// records a readable origin (owner decision C, 2026-10-03).
 pub fn same_price_renews(
     recorded: Option<&PriceOrigin>,
     written: &PriceOrigin,
     zone: DayZone,
 ) -> bool {
-    match recorded {
+    let Some(new) = price_day(written, zone) else {
+        return false;
+    };
+    match recorded.and_then(|r| price_day(r, zone)) {
         None => true,
-        Some(recorded) => match (price_day(recorded, zone), price_day(written, zone)) {
-            (Some(old), Some(new)) => new > old,
-            _ => false,
-        },
+        Some(old) => new > old,
     }
 }
 
@@ -225,6 +258,7 @@ pub fn apply_price_age(study: &mut Study, today: Option<Day>, horizon: u32, zone
     let present = study.judgment.current_price.is_some();
     // No origin, no mark: a price with no recorded origin is [`PriceAge::UnknownDate`], read by
     // the verdict gate itself (`form::price_to_gate_state`).
+    // An unreadable date is never called aged either: it is [`PriceAge::UnknownDate`] too.
     if let Some(origin) = study.judgment.current_price_origin.as_mut() {
         origin.aged = present && today.is_some_and(|t| price_is_aged(origin, t, horizon, zone));
     }
@@ -378,6 +412,74 @@ mod tests {
         assert!(!price_is_aged(&o, day("2030-01-01"), 1, UTC));
     }
 
+    // Owner decision C (Guy 2026-10-03): an origin whose date cannot be read is treated like a
+    // missing origin — an unknown date, stale (« date inconnue »), not « périmé ».
+    #[test]
+    fn an_unreadable_origin_date_is_an_unknown_date() {
+        let mut study = crate::form::tests::full_study();
+        for unreadable in [
+            origin(Source::Manual, "garbage", None),
+            origin(Source::Provider, "2026-13-45T10:00:00Z", None),
+            origin(Source::Provider, "2026-10-06T10:00:00Z", Some("not-a-date")),
+            origin(Source::Derived, "2026-10-06T10:00:00Z", None),
+        ] {
+            assert!(!price_date_known(&unreadable), "{unreadable:?}");
+            assert_eq!(price_date_shown(&unreadable, UTC), None);
+            study.judgment.current_price_origin = Some(unreadable);
+            apply_price_age(&mut study, Some(day("2026-10-06")), 1, UTC);
+            assert_eq!(
+                current_price_age(&study.judgment),
+                Some(PriceAge::UnknownDate)
+            );
+            // The verdict gate counts it stale, like a price with no origin.
+            assert_eq!(
+                crate::form::price_to_gate_state(
+                    study.judgment.current_price,
+                    study.judgment.current_price_origin.as_ref()
+                ),
+                steadyinvest_core::verdict::GateState::Stale
+            );
+        }
+        // A readable origin of the same day is fresh.
+        study.judgment.current_price_origin =
+            Some(origin(Source::Manual, "2026-10-06T10:00:00Z", None));
+        apply_price_age(&mut study, Some(day("2026-10-06")), 1, UTC);
+        assert_eq!(current_price_age(&study.judgment), Some(PriceAge::Fresh));
+    }
+
+    // Owner decision D (Guy 2026-10-03): the date shown for an origin is the day the age counts
+    // from — the local day of the stamp, never its UTC date; a session date is shown as given.
+    #[test]
+    fn the_shown_origin_date_is_the_local_day_of_the_age() {
+        let zurich_summer = DayZone::FixedSecondsEast(2 * 3600);
+        let new_york = DayZone::FixedSecondsEast(-4 * 3600);
+        // Typed at 00:30 in Zurich on Friday (22:30 UTC on Thursday).
+        let typed = origin(Source::Manual, "2026-10-01T22:30:00Z", None);
+        assert_eq!(
+            price_date_shown(&typed, zurich_summer).as_deref(),
+            Some("02/10/2026")
+        );
+        assert_eq!(price_date_shown(&typed, UTC).as_deref(), Some("01/10/2026"));
+        // Fetched at 02:00 UTC on Friday = 22:00 on Thursday in New York.
+        let fetched = origin(Source::Provider, "2026-10-02T02:00:00Z", None);
+        assert_eq!(
+            price_date_shown(&fetched, new_york).as_deref(),
+            Some("01/10/2026")
+        );
+        // A provider session date: shown as given, whatever the zone.
+        let close = origin(Source::Provider, "2026-10-02T23:30:00Z", Some("2026-10-02"));
+        for zone in [UTC, zurich_summer, new_york] {
+            assert_eq!(
+                price_date_shown(&close, zone).as_deref(),
+                Some("02/10/2026")
+            );
+        }
+        // The shown day is the age's day: Friday's price is fresh on Monday in Zurich.
+        assert!(!price_is_aged(&typed, day("2026-10-05"), 1, zurich_summer));
+        assert_eq!(day("1970-01-01").jj_mm_aaaa(), "01/01/1970");
+        assert_eq!(day("2024-02-29").jj_mm_aaaa(), "29/02/2024");
+    }
+
     #[test]
     fn apply_marks_the_read_copy_and_clears_it_again() {
         use steadyinvest_core::verdict::Verdict;
@@ -456,9 +558,11 @@ mod tests {
         assert!(same_price_renews(Some(&session_tue), &typed_thu, UTC));
         // Unknown origin (date unknown, so stale — decision C): any write renews, recording one.
         assert!(same_price_renews(None, &typed_thu, UTC));
-        // An unreadable recorded date never aged, so never renews.
+        // An unreadable recorded date is an unknown date (stale), like no origin: a write renews.
         let garbage = origin(Source::Manual, "garbage", None);
-        assert!(!same_price_renews(Some(&garbage), &typed_thu, UTC));
+        assert!(same_price_renews(Some(&garbage), &typed_thu, UTC));
+        // A write whose own date cannot be read never renews.
+        assert!(!same_price_renews(None, &garbage, UTC));
         assert_eq!(
             UTC.today(&Timestamp("2026-10-01T23:59:59Z".to_string())),
             Some(day("2026-10-01"))

@@ -442,6 +442,13 @@ impl JournalState {
         self.price_stale_after = trading_days;
     }
 
+    /// The zone a stamp's day is read in (owner decision D, Guy 2026-10-03): the clock's — local in
+    /// the app, fixed in tests. The traceability and the study PDF show the price origin's date in
+    /// it, the same zone the price age is counted in.
+    pub fn day_zone(&self) -> steadyinvest_report::price_age::DayZone {
+        self.clock.day_zone()
+    }
+
     /// The user's number format (G1 I): the rails' reading of typed amounts, and the spelling of
     /// the figures the wiring bakes from this state.
     pub fn number_format(&self) -> NumberFormat {

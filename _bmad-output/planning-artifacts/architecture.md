@@ -490,7 +490,14 @@ against this skeleton as the principal go/no-go before committing UI work.
   traceability says « origine non enregistrée — date inconnue », the PDF « Origine du cours actuel :
   non enregistrée — date inconnue ». Writing the price again — retyped or fetched, even the same
   value — records an origin and makes it fresh (`same_price_renews` treats a missing origin as
-  renewable). No current price at all stays the missing-input path. An unknown symbol's notice
+  renewable). An origin whose date cannot be read (`price_age::price_date_known`) is an unknown date
+  the same way — gate `Stale`, « date inconnue », its source named (« fournisseur — date
+  inconnue », « manuel — date inconnue »), renewed by the next write; the date shown for an origin
+  (« récupéré le … », « saisi le … » — traceability via `verdict_trace(…, zone)`, study PDF via
+  `StudyPdfExtras::day_zone`) is `price_age::price_date_shown`, the age's own day in the same
+  `DayZone`, so the shown day never contradicts the age; a session date is shown as given
+  (réconcilié 2026-10-03 : décisions Guy C et D, PR #293). No current price at all stays the
+  missing-input path. An unknown symbol's notice
   names the app's ticker convention (`.DE` → `.XETRA`, `.AX` → `.AU`; `ingestion::ticker`). A
   provider listing currency different from the study's is **refused** before anything is applied.
   A listing quoted in hundredths (GBX, GBp → GBP; ZAc → ZAR; ILA → ILS) is **converted** at one

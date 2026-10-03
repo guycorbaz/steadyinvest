@@ -342,7 +342,9 @@ else the date it was fetched or typed; the age is computed at read time, never s
 2026-10-01 : décision Guy, horizon d'âge du cours). The days are counted in the owner's local time;
 a current price with no recorded origin (written before origins were recorded) has an unknown date
 and is stale too — the verdict provisional, naming « Prix actuel — date inconnue » — until it is
-typed or fetched again (réconcilié 2026-10-03 : décisions Guy, revue PR #293).
+typed or fetched again (réconcilié 2026-10-03 : décisions Guy, revue PR #293); so is a price whose
+recorded date cannot be read. The date shown for a price's origin is the local day its age is
+counted from (réconcilié 2026-10-03 : décision Guy D, PR #293).
 
 ## 6. Banned-verb list (FR13) — posture gate
 

@@ -228,10 +228,24 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
 /// What the app adds to the study PDF that the report crate does not word itself (FR7, Guy's
 /// on-screen test + project review 2026-10-01): the method's quality flags, already stated in the
 /// app's words (« PER haut jugé au-dessus de 25 · … », « aucun », « — » when not assessable), or
-/// `None` when the study did not compute (the line is then left out).
-#[derive(Debug, Clone, Copy, Default)]
+/// `None` when the study did not compute (the line is then left out); and the zone the price
+/// origin's date is shown in (owner decision D, Guy 2026-10-03 — the app's clock zone, local).
+#[derive(Debug, Clone, Copy)]
 pub struct StudyPdfExtras<'a> {
     pub quality_flags: Option<&'a str>,
+    /// The zone « récupéré le … » / « saisi le … » is read in — the SAME zone the price age was
+    /// counted in ([`crate::price_age::price_date_shown`]), so the shown day never contradicts the
+    /// age. The default (UTC) keeps a render deterministic whatever the machine's zone.
+    pub day_zone: crate::price_age::DayZone,
+}
+
+impl Default for StudyPdfExtras<'_> {
+    fn default() -> Self {
+        StudyPdfExtras {
+            quality_flags: None,
+            day_zone: crate::price_age::DayZone::UTC,
+        }
+    }
 }
 
 /// [`render_study_pdf`] with the app's [`StudyPdfExtras`]; without them it is byte-identical.
@@ -411,7 +425,7 @@ pub fn render_study_pdf_with(
 
     // ── §3 Price / earnings history — the form's columns A–H over the window, totals, averages,
     //    the average and current P/E. ──
-    price_earnings_section(&mut doc, &frame, study, nf, current_price);
+    price_earnings_section(&mut doc, &frame, study, nf, current_price, extras.day_zone);
     doc.gap(6.0);
 
     // ── §4 Risk & reward — the form's A–E with every intermediate figure ──
@@ -725,6 +739,7 @@ fn price_earnings_section(
     study: &Study,
     nf: NumberStyle,
     current_price: Option<Decimal>,
+    zone: crate::price_age::DayZone,
 ) {
     let outputs = frame.snapshot.outputs();
     let v = &outputs.valuation;
@@ -867,7 +882,7 @@ fn price_earnings_section(
         ));
     // FR11 (Guy's on-screen test, deferred from #274): the price's origin, as the traceability
     // states it — only when recorded (an older study prints nothing more: the pins hold).
-    if let Some(origin) = price_origin_line(study) {
+    if let Some(origin) = price_origin_line(study, zone) {
         notes.small_line(&origin);
     }
     // PR #291 review: a listing the provider quotes in hundredths (GBX…) names its conversion
@@ -1430,21 +1445,40 @@ fn jj_mm_aaaa(ts: &str) -> String {
 /// FR11 (2026-10-01): « Origine du cours actuel : fournisseur, séance du JJ/MM/AAAA » (or the fetch
 /// date), « manuel, saisi le … », « — périmé » after a failed refresh or past the age horizon
 /// (FR23 — the caller renders a study read through `price_age::apply_price_age`); « non
-/// enregistrée — date inconnue » for a price with no recorded origin (owner decision C, Guy
-/// 2026-10-03: its date is unknown, the verdict provisional). `None` without a current price.
-fn price_origin_line(study: &Study) -> Option<String> {
+/// enregistrée — date inconnue » for a price with no recorded origin, « fournisseur — date
+/// inconnue » / « manuel — date inconnue » for an origin whose date cannot be read (owner decision
+/// C, Guy 2026-10-03: its date is unknown, the verdict provisional). The date shown is the day the
+/// age counts from, in `zone` (owner decision D: the local day — `price_age::price_date_shown`);
+/// a session date is shown as given. `None` without a current price.
+fn price_origin_line(study: &Study, zone: crate::price_age::DayZone) -> Option<String> {
     use steadyinvest_contract::Source;
     study.judgment.current_price?;
-    let Some(o) = study.judgment.current_price_origin.as_ref() else {
-        return Some(format!(
+    let unrecorded = || {
+        Some(format!(
             "{PRICE_ORIGIN} {PRICE_ORIGIN_UNRECORDED}{PRICE_DATE_UNKNOWN}"
-        ));
+        ))
+    };
+    let Some(o) = study.judgment.current_price_origin.as_ref() else {
+        return unrecorded();
+    };
+    let Some(shown) = crate::price_age::price_date_shown(o, zone) else {
+        // The date cannot be read: an unknown date, like a missing origin — its source still named.
+        return match o.source {
+            Source::Provider => Some(format!(
+                "{PRICE_ORIGIN} {PRICE_BY_PROVIDER}{PRICE_DATE_UNKNOWN}"
+            )),
+            Source::Manual => Some(format!(
+                "{PRICE_ORIGIN} {PRICE_BY_OWNER}{PRICE_DATE_UNKNOWN}"
+            )),
+            // A price is never derived — never passed off as typed either.
+            Source::Derived => unrecorded(),
+        };
     };
     let what = match (o.source, &o.session_date) {
-        (Source::Provider, Some(session)) => PRICE_FROM_SESSION.replace("{}", &jj_mm_aaaa(session)),
-        (Source::Provider, None) => PRICE_FETCHED_ON.replace("{}", &jj_mm_aaaa(&o.at.0)),
-        (Source::Manual, _) => PRICE_TYPED_ON.replace("{}", &jj_mm_aaaa(&o.at.0)),
-        (Source::Derived, _) => return None,
+        (Source::Provider, Some(_)) => PRICE_FROM_SESSION.replace("{}", &shown),
+        (Source::Provider, None) => PRICE_FETCHED_ON.replace("{}", &shown),
+        (Source::Manual, _) => PRICE_TYPED_ON.replace("{}", &shown),
+        (Source::Derived, _) => return unrecorded(),
     };
     let stale = if o.is_stale() { PRICE_STALE } else { "" };
     Some(format!("{PRICE_ORIGIN} {what}{stale}"))
@@ -1474,6 +1508,8 @@ const PRICE_ORIGIN: &str = "Origine du cours actuel :";
 const PRICE_FROM_SESSION: &str = "fournisseur, séance du {}";
 const PRICE_FETCHED_ON: &str = "fournisseur, récupéré le {}";
 const PRICE_TYPED_ON: &str = "manuel, saisi le {}";
+const PRICE_BY_PROVIDER: &str = "fournisseur";
+const PRICE_BY_OWNER: &str = "manuel";
 const PRICE_STALE: &str = " — périmé";
 const PRICE_ORIGIN_UNRECORDED: &str = "non enregistrée";
 const PRICE_DATE_UNKNOWN: &str = " — date inconnue";
@@ -1677,6 +1713,8 @@ const REPORT_USER_FACING: &[&str] = &[
     PRICE_FROM_SESSION,
     PRICE_FETCHED_ON,
     PRICE_TYPED_ON,
+    PRICE_BY_PROVIDER,
+    PRICE_BY_OWNER,
     PRICE_STALE,
     PRICE_ORIGIN_UNRECORDED,
     PRICE_DATE_UNKNOWN,
@@ -4368,6 +4406,7 @@ mod tests {
     fn the_quality_flags_line_is_printed_when_the_app_gives_it() {
         let extras = StudyPdfExtras {
             quality_flags: Some("PER haut jugé au-dessus de 25 · ratio hausse / baisse sous 3"),
+            ..StudyPdfExtras::default()
         };
         let with = render_study_pdf_with(&demo_study(), NumberStyle::Comma, &extras).unwrap();
         assert!(contains(
@@ -4376,6 +4415,7 @@ mod tests {
         ));
         let blank = StudyPdfExtras {
             quality_flags: Some("  "),
+            ..StudyPdfExtras::default()
         };
         assert_eq!(
             render_study_pdf_with(&demo_study(), NumberStyle::Comma, &blank).unwrap(),
@@ -5275,6 +5315,7 @@ mod tests {
             &study,
             NumberStyle::Point,
             Some(Decimal::from(80)),
+            crate::price_age::DayZone::UTC,
         );
         let pages = page_streams(&doc.finish());
         assert_eq!(pages.len(), 2);
@@ -5327,10 +5368,87 @@ mod tests {
             &bytes,
             "Origine du cours actuel : non enregistrée — date inconnue"
         ));
+        // An origin whose date cannot be read: an unknown date too, its source still named.
+        study.judgment.current_price_origin = Some(PriceOrigin {
+            source: Source::Manual,
+            at: Timestamp("garbage".to_string()),
+            session_date: None,
+            freshness: Freshness::Current,
+            aged: false,
+        });
+        let bytes = render_study_pdf(&study, NumberStyle::Comma).unwrap();
+        assert!(contains(
+            &bytes,
+            "Origine du cours actuel : manuel — date inconnue"
+        ));
+        study.judgment.current_price_origin = Some(PriceOrigin {
+            source: Source::Provider,
+            at: Timestamp("2026-10-01T09:00:00Z".to_string()),
+            session_date: Some("not-a-date".to_string()),
+            freshness: Freshness::Current,
+            aged: false,
+        });
+        let bytes = render_study_pdf(&study, NumberStyle::Comma).unwrap();
+        assert!(contains(
+            &bytes,
+            "Origine du cours actuel : fournisseur — date inconnue"
+        ));
         // No current price at all: no origin line (the missing-input path).
         study.judgment.current_price = None;
         let bytes = render_study_pdf(&study, NumberStyle::Comma).unwrap();
         assert!(!contains(&bytes, "Origine du cours actuel"));
+    }
+
+    // Owner decision D (Guy 2026-10-03): the origin's date is the LOCAL day the age counts from,
+    // in the zone the app passes — fixed offsets here, never the machine's zone.
+    #[test]
+    fn the_price_origin_date_is_shown_in_the_given_zone() {
+        use crate::price_age::DayZone;
+        use steadyinvest_contract::{Freshness, PriceOrigin, Source, Timestamp};
+        let mut study = demo_study();
+        let render = |study: &Study, secs: i32| {
+            let extras = StudyPdfExtras {
+                day_zone: DayZone::FixedSecondsEast(secs),
+                ..StudyPdfExtras::default()
+            };
+            render_study_pdf_with(study, NumberStyle::Comma, &extras).unwrap()
+        };
+        // Typed at 00:30 in Zurich on 2 October (22:30 UTC on 1 October).
+        study.judgment.current_price_origin = Some(PriceOrigin {
+            source: Source::Manual,
+            at: Timestamp("2026-10-01T22:30:00Z".to_string()),
+            session_date: None,
+            freshness: Freshness::Current,
+            aged: false,
+        });
+        let zurich = render(&study, 2 * 3600);
+        assert!(contains(&zurich, "manuel, saisi le 02/10/2026"));
+        assert!(!contains(&zurich, "01/10/2026"));
+        assert!(contains(&render(&study, 0), "manuel, saisi le 01/10/2026"));
+        // Fetched without a session date at 02:00 UTC = 22:00 the evening before in New York.
+        study.judgment.current_price_origin = Some(PriceOrigin {
+            source: Source::Provider,
+            at: Timestamp("2026-10-02T02:00:00Z".to_string()),
+            session_date: None,
+            freshness: Freshness::Current,
+            aged: false,
+        });
+        assert!(contains(
+            &render(&study, -4 * 3600),
+            "fournisseur, récupéré le 01/10/2026"
+        ));
+        // A session date is the provider's date: shown as given, whatever the zone.
+        study.judgment.current_price_origin = Some(PriceOrigin {
+            source: Source::Provider,
+            at: Timestamp("2026-10-02T23:30:00Z".to_string()),
+            session_date: Some("2026-10-02".to_string()),
+            freshness: Freshness::Current,
+            aged: false,
+        });
+        assert!(contains(
+            &render(&study, 2 * 3600),
+            "fournisseur, séance du 02/10/2026"
+        ));
     }
 
     // PR #291 review: a listing converted from hundredths is named beside the price origin.
