@@ -53,6 +53,14 @@ export struct StudyRow {
     company-name: string,
     // Story 8.5a: the study's pending AI drafts — « ★ {n} » after the name when > 0.
     pending-drafts: int,
+    // Issue #294 (Guy, 2026-10-03): the U/D emoticon key beside the ticker — "high" (≥ the high
+    // threshold) | "unbounded" (« ∞ », price ≤ forecast low) | "middle" | "low" (< the low
+    // threshold); "" = none, exactly when the U/D column reads « — » (withheld verdict, unknown
+    // ratio). Classified in Rust (`viewmodel::studies::ud_mood`). Screen only, never in a PDF.
+    ud-mood: string,
+    // Issue #294: the verdict is provisional (stale or undated price, PR #293) — the emoticon is
+    // drawn greyed. Always false when `ud-mood` is "".
+    ud-mood-greyed: bool,
 }
 
 // One watchlist row (Story 4.1, FR34). `linked` is the authoritative link state (the cell's
@@ -682,6 +690,12 @@ export struct NoteRow {
 export global Studies {
     // The current list (deterministic created_at,id order from persistence). Empty = none yet.
     in-out property <[StudyRow]> rows;
+    // Issue #294: the U/D emoticon thresholds' CANONICAL spellings (« 3 », « 1/3 », « 0.5 »),
+    // mirrored by Rust from `AppConfig::ud_threshold_spellings_or_default` — the parse source
+    // `refresh_studies` classifies with (the Holdings canonical-mirror pattern); never shown (the
+    // Réglages and the row's tooltip read `Prefs.ud-*-threshold`, spelled in the number format).
+    in-out property <string> ud-high-canonical: "3";
+    in-out property <string> ud-low-canonical: "1/3";
     // A neutral, fact-stating banner (errors / read-only / startup notices). Empty = hidden.
     // The study LIST's slot only — shown on the list, never on an open study (G1 J).
     in-out property <string> notice;
@@ -1072,6 +1086,11 @@ export global Prefs {
     // AppConfig.price_stale_after_or_default — always a value, 1 by default). A price older than
     // this many trading days (Monday–Friday) is « périmé » and the verdict provisional.
     in-out property <string> price-stale-after;
+    // Issue #294 (Guy, 2026-10-03): the study list's U/D emoticon thresholds, as the user reads
+    // them (a decimal in the number format, or a fraction « 1/3 »; always effective values —
+    // defaults 3 and 1/3). Mirrored from `AppConfig::ud_thresholds_or_default`.
+    in-out property <string> ud-high-threshold;
+    in-out property <string> ud-low-threshold;
     // G1 P review (M3): after a reference-currency change, the legacy lots (no declared currency)
     // whose stop was set in the former reference currency — named, never converted ("" = none).
     in-out property <string> reference-currency-notice;
@@ -1139,6 +1158,9 @@ export global Prefs {
     callback default-trailing-stop-pct-changed(string) -> bool; // "" clears; else a percent in (0,100); → written?
     callback withholding-rate-pct-changed(string) -> bool; // "" resets to 35; else a percent in [0,100]; → written?
     callback price-stale-after-changed(string) -> bool; // "" resets to 1; else whole trading days in [1,260]; → written?
+    // Issue #294: high, low ("" = that field's default, 3 / 1/3); committed as a pair, low < high
+    // on the effective values, else refused by name; → written?
+    callback ud-thresholds-changed(string, string) -> bool;
     // The key travels ONE WAY into Rust as a call argument — never stored in an `in-out` property
     // that could round-trip back out to config/UI (NFR-S1). Issue #41: `key-saved` returns whether a
     // save actually happened, so the field is cleared ONLY on a real save (a blank/failed save keeps

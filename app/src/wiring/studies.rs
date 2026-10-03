@@ -236,6 +236,14 @@ pub(crate) fn refresh_studies(ui: &MainWindow, state: &JournalState) {
     let format =
         crate::viewmodel::format::NumberFormat::parse(&ui.global::<Prefs>().get_number_format())
             .unwrap_or_default();
+    // Issue #294: the U/D emoticon thresholds, from their canonical mirror (set by
+    // `mirror_risk_settings` from the validated config accessor); a pair that does not read or is
+    // not ordered falls back to the defaults whole, as the accessor does.
+    let ud_thresholds = viewmodel::studies::UdThresholds::from_spellings(
+        studies.get_ud_high_canonical().as_str(),
+        studies.get_ud_low_canonical().as_str(),
+    )
+    .unwrap_or_default();
     let mut returns: std::collections::HashMap<uuid::Uuid, viewmodel::studies::StudyReturn> =
         std::collections::HashMap::new();
     for summary in &summaries {
@@ -282,6 +290,16 @@ pub(crate) fn refresh_studies(ui: &MainWindow, state: &JournalState) {
             ),
             None => "",
         };
+        // Issue #294 (Guy, 2026-10-03): the emoticon off the U/D column's own sort value (so « — »
+        // never carries one), greyed when the verdict is provisional — keyed by the verdict
+        // itself, never by the ratio's text.
+        let ud_mood = viewmodel::studies::ud_mood(ud_value, ud_thresholds);
+        let provisional = snapshot.as_ref().is_some_and(|snap| {
+            matches!(
+                snap.verdict(),
+                steadyinvest_core::verdict::Verdict::Provisional(_)
+            )
+        });
         returns.insert(
             summary.id,
             viewmodel::studies::StudyReturn {
@@ -293,6 +311,8 @@ pub(crate) fn refresh_studies(ui: &MainWindow, state: &JournalState) {
                 zone,
                 // The user-entered company name shown after the ticker on the list row (2026-07-12).
                 company_name: study.company_name.clone().unwrap_or_default(),
+                ud_mood,
+                provisional,
             },
         );
     }
