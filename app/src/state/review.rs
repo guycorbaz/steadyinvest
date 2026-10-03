@@ -256,17 +256,16 @@ fn review_threshold(today: &str) -> Option<String> {
 
 /// The last effective save's day: the latest FR51 snapshot, else the study's creation — or
 /// `None` when the history read FAILED (an unknown date, never the creation date passed off as
-/// the last save: that would state a false « plus de 12 mois »).
-fn last_saved_day<E>(history: Result<Vec<String>, E>, created_at: &str) -> Option<String> {
+/// the last save: that would state a false « plus de 12 mois »). The day is read in `zone`, the
+/// owner's local time (owner decision, Guy 2026-10-03), as today's is.
+fn last_saved_day<E>(
+    history: Result<Vec<String>, E>,
+    created_at: &str,
+    zone: steadyinvest_report::price_age::DayZone,
+) -> Option<String> {
     let latest = history.ok()?.into_iter().max();
-    Some(
-        latest
-            .as_deref()
-            .unwrap_or(created_at)
-            .chars()
-            .take(10)
-            .collect(),
-    )
+    let stamp = steadyinvest_contract::Timestamp(latest.unwrap_or_else(|| created_at.to_string()));
+    Some(zone.shown(&stamp, steadyinvest_report::price_age::Day::iso))
 }
 
 /// Every reason a study is due for its review, in the fixed order age · age unknown · withheld
@@ -445,6 +444,7 @@ impl JournalState {
             self.try_list_study_history(s.id)
                 .map(|h| h.into_iter().map(|e| e.created_at.0).collect::<Vec<_>>()),
             &s.created_at.0,
+            self.day_zone(),
         );
         let due = match (threshold, last_saved.as_deref()) {
             (Some(t), Some(saved)) => saved < t,
@@ -560,7 +560,7 @@ impl JournalState {
             .into_iter()
             .filter(|h| h.sold_at.is_none())
             .collect();
-        let today: String = self.clock.now().0.chars().take(10).collect();
+        let today = self.today_shown();
         let threshold = review_threshold(&today);
 
         let diversification =
@@ -836,6 +836,8 @@ mod tests {
     fn a_failed_history_read_leaves_the_last_save_unknown() {
         // The latest snapshot wins; an empty history falls back to the creation; a FAILED read
         // is unknown — never the creation date passed off as the last save.
+        use steadyinvest_report::price_age::DayZone;
+        let utc = DayZone::UTC;
         let created = "2024-03-01T10:00:00Z";
         assert_eq!(
             last_saved_day::<()>(
@@ -843,16 +845,30 @@ mod tests {
                     "2025-01-02T00:00:00Z".into(),
                     "2026-02-03T00:00:00Z".into()
                 ]),
-                created
+                created,
+                utc,
             )
             .as_deref(),
             Some("2026-02-03")
         );
         assert_eq!(
-            last_saved_day::<()>(Ok(Vec::new()), created).as_deref(),
+            last_saved_day::<()>(Ok(Vec::new()), created, utc).as_deref(),
             Some("2024-03-01")
         );
-        assert_eq!(last_saved_day(Err("disk"), created), None);
+        assert_eq!(last_saved_day(Err("disk"), created, utc), None);
+        // The day in the owner's zone (owner decision, Guy 2026-10-03), never the machine's: a
+        // save at 23:30 UTC is the next day in Zurich, the same day in New York.
+        let late = || Ok::<_, ()>(vec!["2026-09-30T23:30:00Z".to_string()]);
+        let zurich_summer = DayZone::FixedSecondsEast(2 * 3600);
+        let new_york = DayZone::FixedSecondsEast(-4 * 3600);
+        assert_eq!(
+            last_saved_day(late(), created, zurich_summer).as_deref(),
+            Some("2026-10-01")
+        );
+        assert_eq!(
+            last_saved_day(late(), created, new_york).as_deref(),
+            Some("2026-09-30")
+        );
     }
 
     #[test]

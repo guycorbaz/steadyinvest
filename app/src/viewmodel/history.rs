@@ -8,8 +8,9 @@
 //! lives in Rust (the composed lines cross to Slint as data, the `verdict_trace` precedent) and is
 //! inventoried in [`HISTORY_USER_FACING_LABELS`] for the posture gate (FR13).
 
-use steadyinvest_contract::{Judgment, Money, Study, YearData};
+use steadyinvest_contract::{Judgment, Money, Study, Timestamp, YearData};
 use steadyinvest_core::rounding::DisplayField;
+use steadyinvest_report::price_age::{Day, DayZone};
 use uuid::Uuid;
 
 use crate::viewmodel::engine::{
@@ -465,12 +466,16 @@ fn note_change_label(change: &NoteChange) -> &'static str {
     }
 }
 
-fn day_of(stamp: &str) -> String {
-    stamp.get(..10).unwrap_or(stamp).to_string()
+/// The entry's day (`AAAA-MM-JJ`, the day header) in `zone` — the owner's local time (owner
+/// decision, Guy 2026-10-03: a save at 00:30 in Zurich is that day's, not the day before).
+fn day_of(stamp: &str, zone: DayZone) -> String {
+    zone.shown(&Timestamp(stamp.to_string()), Day::iso)
 }
 
-fn time_of(stamp: &str) -> String {
-    stamp.get(11..16).unwrap_or_default().to_string()
+/// The entry's time of day (`HH:MM`) in `zone`; empty when the stamp is unreadable.
+fn time_of(stamp: &str, zone: DayZone) -> String {
+    zone.hh_mm(&Timestamp(stamp.to_string()))
+        .unwrap_or_default()
 }
 
 /// Build the timeline (NEWEST first) from the study's snapshot series (OLDEST first, as
@@ -481,6 +486,7 @@ pub fn history_entries(
     snapshots: &[(Uuid, String, Study)],
     drafts: &[HistoryDraft],
     format: NumberFormat,
+    zone: DayZone,
 ) -> Vec<HistoryEntryView> {
     // (stamp, rank, entry): at the same instant the snapshot (rank 0, the effect) comes before the
     // ★ entry naming its cause (rank 1) — Story 8.7 Decision 7; newest first once reversed.
@@ -500,9 +506,9 @@ pub fn history_entries(
             index,
             HistoryEntryView {
                 id: *id,
-                day: day_of(stamp),
+                day: day_of(stamp, zone),
                 first_of_day: false, // filled below
-                time: time_of(stamp),
+                time: time_of(stamp, zone),
                 summary,
                 notes_only,
                 ai: false,
@@ -516,9 +522,9 @@ pub fn history_entries(
             index,
             HistoryEntryView {
                 id: d.id,
-                day: day_of(&d.decided_at),
+                day: day_of(&d.decided_at, zone),
                 first_of_day: false,
-                time: time_of(&d.decided_at),
+                time: time_of(&d.decided_at, zone),
                 summary: d.summary.clone(),
                 notes_only: false,
                 ai: true,
@@ -703,6 +709,7 @@ mod tests {
             ],
             &[],
             NumberFormat::Comma,
+            DayZone::UTC,
         );
         assert_eq!(entries[1].summary, HIST_FROZEN_SET);
         assert_eq!(entries[0].summary, HIST_FROZEN_REMOVED);
@@ -740,7 +747,7 @@ mod tests {
                 summary: "★ Proposition rejetée : nouvelle note".to_string(),
             },
         ];
-        let entries = history_entries(&snapshots, &drafts, NumberFormat::Comma);
+        let entries = history_entries(&snapshots, &drafts, NumberFormat::Comma, DayZone::UTC);
         let ids: Vec<u128> = entries.iter().map(|e| e.id.as_u128()).collect();
         assert_eq!(
             ids,
@@ -769,7 +776,7 @@ mod tests {
                 edited,
             ),
         ];
-        let entries = history_entries(&snapshots, &[], NumberFormat::Comma);
+        let entries = history_entries(&snapshots, &[], NumberFormat::Comma, DayZone::UTC);
         assert_eq!(entries.len(), 2);
         // Newest first; each new day carries the header flag.
         assert_eq!(entries[0].id, Uuid::from_u128(0xB));
@@ -778,6 +785,29 @@ mod tests {
         assert!(entries[0].first_of_day);
         assert!(entries[1].first_of_day, "a different day re-flags");
         assert_eq!(entries[1].summary, HIST_CREATED);
+        // The day and time in the owner's zone (owner decision, Guy 2026-10-03) — fixed offsets,
+        // never the machine's: 10:30 UTC is 12:30 in Zurich (summer), 06:30 in New York.
+        let zurich = history_entries(
+            &snapshots,
+            &[],
+            NumberFormat::Comma,
+            DayZone::FixedSecondsEast(2 * 3600),
+        );
+        assert_eq!(
+            (zurich[0].day.as_str(), zurich[0].time.as_str()),
+            ("2026-07-09", "12:30")
+        );
+        let far_east = history_entries(
+            &snapshots,
+            &[],
+            NumberFormat::Comma,
+            DayZone::FixedSecondsEast(14 * 3600),
+        );
+        assert_eq!(
+            (far_east[0].day.as_str(), far_east[0].time.as_str()),
+            ("2026-07-10", "00:30"),
+            "past midnight locally: the next day's header"
+        );
         // The edit entry names its changed cells — the year 2024 appeared with its figures.
         assert!(
             entries[0].summary.contains(HIST_YEAR_ADDED),
@@ -928,6 +958,7 @@ mod tests {
             ],
             &[],
             NumberFormat::Comma,
+            DayZone::UTC,
         );
         assert_eq!(
             entries[0].summary,
@@ -965,6 +996,7 @@ mod tests {
             ],
             &[],
             NumberFormat::Comma,
+            DayZone::UTC,
         );
         assert!(!entries[0].notes_only);
         assert!(entries[0].summary.contains(HIST_NOTE_ADDED));
@@ -1002,7 +1034,7 @@ mod tests {
                 noted_again,
             ),
         ];
-        let all = history_entries(&snapshots, &[], NumberFormat::Comma);
+        let all = history_entries(&snapshots, &[], NumberFormat::Comma, DayZone::UTC);
         assert_eq!(visible_history(all.clone(), false), all, "shown by default");
         let shown = visible_history(all, true);
         let ids: Vec<Uuid> = shown.iter().map(|e| e.id).collect();

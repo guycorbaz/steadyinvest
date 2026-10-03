@@ -722,7 +722,8 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
                 pct_or_dash(&l.share),
                 study_label(l).to_string(),
                 zone_label(&l.zone, review.zones),
-                or_dash(&l.ud),
+                // The app's « ∞ » (undefined ratio) has no WinAnsi glyph — printed in words.
+                crate::pdf::printable_ud(&or_dash(&l.ud)),
                 or_dash(&l.relative),
             ];
             let refs: Vec<&str> = cells.iter().map(String::as_str).collect();

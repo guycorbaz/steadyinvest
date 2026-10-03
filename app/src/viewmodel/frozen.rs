@@ -12,6 +12,7 @@ use steadyinvest_contract::{
     Study, Timestamp,
 };
 use steadyinvest_core::rounding::DisplayField;
+use steadyinvest_report::price_age::DayZone;
 
 use crate::viewmodel::drafts::option_label;
 use crate::viewmodel::engine::{
@@ -119,10 +120,10 @@ pub enum StripView {
     },
 }
 
-/// JJ/MM of an RFC 3339 stamp (its UTC date).
-pub fn day_month(stamp: &Timestamp) -> String {
-    // G3: the stamp's UTC date, the PDF's and the history's rule — one date on every surface.
-    steadyinvest_report::frozen::day_month(stamp)
+/// JJ/MM of an RFC 3339 stamp — its day in `zone`, the owner's local time (owner decision, Guy
+/// 2026-10-03; G3: the PDF's and the history's rule — one date on every surface).
+pub fn day_month(stamp: &Timestamp, zone: DayZone) -> String {
+    steadyinvest_report::frozen::day_month(stamp, zone)
 }
 
 /// Build the strip (Story 8.8). `current`: the live verdict in the frozen shape; `open_inputs`:
@@ -133,11 +134,12 @@ pub fn strip(
     current_state: CurrentState,
     open_inputs: Option<&str>,
     format: NumberFormat,
+    zone: DayZone,
 ) -> StripView {
     let Some(frozen) = study.frozen_verdict.as_ref() else {
         return StripView::None;
     };
-    let date = day_month(&frozen.frozen_at);
+    let date = day_month(&frozen.frozen_at, zone);
     let full = current_state == CurrentState::Full;
     if !steadyinvest_report::frozen::differs(frozen, current, full) {
         return StripView::Same { date };
@@ -251,7 +253,7 @@ pub fn strip(
             current,
             &changed_inputs,
             if full { None } else { open_inputs },
-            &day_month,
+            &|t| day_month(t, zone),
         ),
     };
     StripView::Differs {
@@ -271,14 +273,10 @@ fn crit(c: FrozenCriterion) -> &'static str {
     }
 }
 
+/// The frozen U/D through THE screens' U/D formatter (`engine::fmt_ud`): « ∞ » for an undefined
+/// ratio (owner decision, Guy 2026-10-03), « — » when unknown.
 fn fmt_ud(ud: &FrozenUpsideDownside, format: NumberFormat) -> String {
-    match ud {
-        FrozenUpsideDownside::Ratio(r) => format!(
-            "{}:1",
-            format_scaled(r.as_decimal(), DisplayField::Ratio, format)
-        ),
-        _ => HIST_EMPTY_SLOT.to_string(),
-    }
+    crate::viewmodel::engine::fmt_ud(&steadyinvest_report::frozen::upside_downside(ud), format)
 }
 
 fn fmt_pct(v: Option<&Money>, format: NumberFormat) -> String {
@@ -382,5 +380,12 @@ pub fn strip_of(study: &Study, now: &Timestamp, format: NumberFormat) -> StripVi
         steadyinvest_core::verdict::Verdict::Withheld(_) => CurrentState::Withheld,
     };
     let open = crate::viewmodel::engine::open_inputs(&frame.snapshot, study);
-    strip(study, &current, state, open.as_deref(), format)
+    strip(
+        study,
+        &current,
+        state,
+        open.as_deref(),
+        format,
+        DayZone::UTC,
+    )
 }

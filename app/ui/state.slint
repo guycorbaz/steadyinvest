@@ -39,8 +39,8 @@ export struct StudyRow {
     potential-return: string,
     // Guy's on-screen test (2026-09-30): the upside/downside ratio, right after the potential —
     // already locale-formatted (« 3,4:1 », the study's own `fmt_ud`); « ∞ » when undefined (price
-    // ≤ forecast low — Guy, 2026-10-03); « — » when unknown or when the verdict is withheld
-    // (`viewmodel::studies::ud_facts`; the list deliberately differs from the study screen there).
+    // ≤ forecast low — Guy, 2026-10-03, as on every screen); « — » when unknown or when the verdict
+    // is withheld (`viewmodel::studies::ud_facts`; the list differs from the study screen there).
     ud-ratio: string,
     // Issue #148: the study still has a MISSING load-bearing input (verdict Withheld) — drives a
     // neutral "à compléter" marker so an unfinished study is evident from the list, before opening it.

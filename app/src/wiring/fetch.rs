@@ -515,7 +515,10 @@ pub(crate) fn wire_fetch(ui: &MainWindow, s: &Session) {
                                             price,
                                             &config.borrow().reference_currency_or_default(),
                                         );
-                                    let now = display_timestamp(&journal_state.borrow().now());
+                                    let now = {
+                                        let state = journal_state.borrow();
+                                        display_timestamp(&state.now(), state.day_zone())
+                                    };
                                     holding_freshness.borrow_mut().insert(
                                         key,
                                         HoldingFreshness {

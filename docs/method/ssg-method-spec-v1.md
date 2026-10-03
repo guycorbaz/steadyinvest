@@ -423,7 +423,7 @@ division-by-zero panic.
 
 | Case | Rule |
 |------|------|
-| **U/D denominator ≤ 0** (`current_price ≤ forecast_low`; the §4 constraint allows equality) | U/D is **undefined** → verdict withheld for the U/D criterion; surface as a state, not a number. If `current_price < forecast_low`, also raise `low_price_above_current`. |
+| **U/D denominator ≤ 0** (`current_price ≤ forecast_low`; the §4 constraint allows equality) | U/D is **undefined** → verdict withheld for the U/D criterion; surface as a state, not a number — the app shows the state as « ∞ » (unbounded; « illimité » in the PDFs), never « — », which stays for an unknown ratio (réconcilié 2026-10-03 : décision Guy). If `current_price < forecast_low`, also raise `low_price_above_current`. |
 | **CAGR base ≤ 0 or sign-crossing** (start EPS ≤ 0, or start/end opposite signs) | CAGR is **unknown/insufficient** (do not compute `(end/start)^(1/n)`); the affected growth output is `unknown`, never 0. |
 | **Current P/E with TTM EPS ≤ 0** (`Σ last 4 quarterly EPS ≤ 0`) | Current P/E **unknown** → relative value and `relative_value_high` are **unknown** (not computed); verdict's relative-value criterion is unmet-by-insufficiency. |
 | **Per-year P/E with EPS ≤ 0** | that year's P/E is `unknown` (`negative_or_zero_denominator`), excluded from the 5-yr P/E averages. |

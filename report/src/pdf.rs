@@ -291,7 +291,13 @@ pub fn render_study_pdf_with(
             ("Symbole", &study.security_ticker),
             // G1 final (L11): the date is the study's CREATION date, labelled as the screen
             // labels it (« Créée le ») — the comparison PDF's per-study date is the same one.
-            (CREATED_ON, &date_prefix(&study.created_at.0)),
+            // Its day in the owner's zone (owner decision, Guy 2026-10-03), as the screen.
+            (
+                CREATED_ON,
+                &extras
+                    .day_zone
+                    .shown(&study.created_at, crate::price_age::Day::iso),
+            ),
         ],
         [
             ("Monnaie", &study.native_currency),
@@ -658,7 +664,7 @@ pub fn render_study_pdf_with(
 
     // Story 8.8 (spec §7): the frozen verdict, and the current one beside it when they differ.
     if let Some(frozen) = &study.frozen_verdict {
-        frozen_block(&mut doc, study, &frame, frozen, nf, zones);
+        frozen_block(&mut doc, study, &frame, frozen, nf, zones, extras.day_zone);
     }
 
     // ── Annexe — every historical figure (the form plots them; the table keeps the exact values) ──
@@ -1279,7 +1285,7 @@ fn price_position(place: PricePlace, zones: ZoneNouns) -> String {
 fn upside(u: &UpsideDownside, nf: NumberStyle) -> String {
     match u {
         UpsideDownside::Ratio(d) => format!("{} : 1", nf.fmt_dec(Some(*d), DisplayField::Ratio)),
-        UpsideDownside::Undefined => "— (dénominateur non positif)".to_string(),
+        UpsideDownside::Undefined => UD_UNBOUNDED_PDF.to_string(),
         UpsideDownside::Unknown => EM_DASH.to_string(),
     }
 }
@@ -1303,8 +1309,12 @@ fn frozen_block(
     frozen: &steadyinvest_contract::FrozenVerdict,
     nf: NumberStyle,
     zones: ZoneNouns,
+    day_zone: crate::price_age::DayZone,
 ) {
-    use steadyinvest_contract::{FrozenCriterion, FrozenUpsideDownside, FrozenVerdict, FrozenZone};
+    use steadyinvest_contract::{FrozenCriterion, FrozenVerdict, FrozenZone};
+    // The freeze's day in the owner's zone (owner decision, Guy 2026-10-03), as on the screen.
+    let jj_mm_aaaa =
+        |t: &steadyinvest_contract::Timestamp| day_zone.shown(t, crate::price_age::Day::jj_mm_aaaa);
     let current = crate::form::verdict_record(
         study,
         frame,
@@ -1334,15 +1344,7 @@ fn frozen_block(
         .to_string()
     };
     let ud = |v: &FrozenVerdict| {
-        let ratio = match &v.upside_downside {
-            FrozenUpsideDownside::Ratio(r) => {
-                format!(
-                    "{} : 1",
-                    nf.fmt_dec(Some(r.as_decimal()), DisplayField::Ratio)
-                )
-            }
-            _ => EM_DASH.to_string(),
-        };
+        let ratio = upside(&crate::frozen::upside_downside(&v.upside_downside), nf);
         format!(
             "{ratio} · {FROZEN_UD_TARGET} : {}",
             crit(v.ud_at_or_above_target)
@@ -1378,7 +1380,7 @@ fn frozen_block(
     doc.gap(4.0);
     doc.line(&format!(
         "{FROZEN_ON} {} ({})",
-        jj_mm_aaaa(&frozen.frozen_at.0),
+        jj_mm_aaaa(&frozen.frozen_at),
         frozen.method_version
     ));
     // G3: ONE rule with the screen — a current verdict no longer full differs too.
@@ -1393,7 +1395,7 @@ fn frozen_block(
     }
     doc.line(&format!(
         "{FROZEN_DIFFERS} {}",
-        jj_mm_aaaa(&frozen.frozen_at.0)
+        jj_mm_aaaa(&frozen.frozen_at)
     ));
     if !full {
         doc.line(&format!(
@@ -1435,25 +1437,11 @@ fn frozen_block(
         "{method_mark}{FROZEN_ROW_METHOD} : {} -> {}",
         frozen.method_version, current.method_version
     ));
-    let cause = crate::frozen::causes(
-        study,
-        frozen,
-        &current,
-        &changed,
-        None,
-        &crate::frozen::day_month,
-    )
+    let cause = crate::frozen::causes(study, frozen, &current, &changed, None, &|t| {
+        crate::frozen::day_month(t, day_zone)
+    })
     .replace('→', "->");
     doc.line(&format!("{FROZEN_CAUSE} : {cause}"));
-}
-
-/// `JJ/MM/AAAA` of an ISO timestamp (its UTC date).
-fn jj_mm_aaaa(ts: &str) -> String {
-    let d = date_prefix(ts);
-    match (d.get(0..4), d.get(5..7), d.get(8..10)) {
-        (Some(y), Some(m), Some(day)) => format!("{day}/{m}/{y}"),
-        _ => d,
-    }
 }
 
 /// FR11 (2026-10-01): « Origine du cours actuel : fournisseur, séance du JJ/MM/AAAA » (or the fetch
@@ -1556,12 +1544,21 @@ const FROZEN_CURRENT: &str = "actuel";
 const FROZEN_PROVISIONAL: &str = "provisoire";
 const FROZEN_WITHHELD: &str = "retenu";
 
-/// The `YYYY-MM-DD` prefix of an ISO timestamp (char-safe, no byte slicing).
-fn date_prefix(ts: &str) -> String {
-    ts.chars().take(10).collect()
-}
-
 pub(crate) const EM_DASH: &str = "—";
+/// [`crate::UD_UNBOUNDED`] as the PDFs print it (owner decision, Guy 2026-10-03): the PDF font is
+/// standard-14 Helvetica in WinAnsi, which has no « ∞ » glyph (it would print « ? ») and the
+/// renderer has no other font to draw one with — so the PDFs, and only they, say it in words.
+pub const UD_UNBOUNDED_PDF: &str = "illimité";
+
+/// A U/D cell handed over by the app (comparison, review) as the PDF prints it: the unbounded
+/// symbol becomes [`UD_UNBOUNDED_PDF`]; any other cell is printed as is.
+pub(crate) fn printable_ud(cell: &str) -> String {
+    if cell == crate::UD_UNBOUNDED {
+        UD_UNBOUNDED_PDF.to_string()
+    } else {
+        cell.to_string()
+    }
+}
 
 // ── neutral user-facing string inventory (FR13) ──
 //
@@ -1731,6 +1728,7 @@ const REPORT_USER_FACING: &[&str] = &[
     PRICE_STALE,
     PRICE_ORIGIN_UNRECORDED,
     PRICE_DATE_UNKNOWN,
+    UD_UNBOUNDED_PDF,
     "plus haut de l'année en cours :",
     "plus bas de l'année en cours :",
     // §4.
@@ -3959,6 +3957,32 @@ mod tests {
             "2,7 : 1"
         );
         assert_eq!(NumberStyle::default(), NumberStyle::Comma);
+    }
+
+    #[test]
+    fn an_undefined_ud_prints_in_words_because_winansi_has_no_infinity() {
+        // Owner decision (Guy, 2026-10-03): an undefined ratio is unbounded — « ∞ » on screen.
+        // The standard-14 Helvetica has no such glyph in WinAnsi (it would print « ? »), so every
+        // PDF says it in words; the unknown ratio stays the em-dash.
+        assert_eq!(winansi(crate::UD_UNBOUNDED), vec![b'?'], "no WinAnsi glyph");
+        assert!(!winansi(UD_UNBOUNDED_PDF).contains(&b'?'));
+        let nf = NumberStyle::Comma;
+        assert_eq!(upside(&UpsideDownside::Undefined, nf), UD_UNBOUNDED_PDF);
+        assert_eq!(upside(&UpsideDownside::Unknown, nf), EM_DASH);
+        // The cells the app hands over (comparison, review): the symbol alone is translated.
+        assert_eq!(printable_ud(crate::UD_UNBOUNDED), UD_UNBOUNDED_PDF);
+        assert_eq!(printable_ud("3,4:1"), "3,4:1");
+        assert_eq!(printable_ud(EM_DASH), EM_DASH);
+        // The frozen verdict prints through the same formatter.
+        use steadyinvest_contract::FrozenUpsideDownside as F;
+        assert_eq!(
+            upside(&crate::frozen::upside_downside(&F::Undefined), nf),
+            UD_UNBOUNDED_PDF
+        );
+        assert_eq!(
+            upside(&crate::frozen::upside_downside(&F::Unknown), nf),
+            EM_DASH
+        );
     }
 
     #[test]

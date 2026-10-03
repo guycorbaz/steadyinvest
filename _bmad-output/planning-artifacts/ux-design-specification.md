@@ -547,6 +547,15 @@ from the Defining-Interaction section) and the coverage/freshness states are ren
 - **Stale** — ~60 % opacity + a hollow dot / slight italic (a discreet murmur).
 - **Source** (provider / manual / derived) — revealed on demand (hover/focus), not always-on.
 
+**Two display rules (réconcilié 2026-10-03 : décision Guy).** An **undefined U/D ratio** (the
+current price at or below the forecast low: no downside, a positive upside) is the most favourable
+case, not a hole: it reads « ∞ » wherever a ratio is shown (study §4 and scenarios, comparison row
+21, review, frozen-verdict strip, study list, replacement candidates) and « illimité » in the PDFs;
+only an **unknown** ratio is the em-dash. Every **date or time** of a recorded instant is shown in the
+owner's **local** time (traceability « dernière mise à jour le … », « Verdict figé le … », history
+day headers and times, list and comparison dates, review, holdings freshness) — never a UTC day
+that would date a 00:30 Zurich save the day before; dates the owner types are shown as typed.
+
 **Asymmetric attenuation (a safety rule, not a style choice).** In contemplation, only the
 *positive* marker (`✓`) may dim. The *negative* signals — `?`, stale, provider-divergent, missing —
 **never attenuate**; they stay (or gain) salience at the exact point the verdict is read, so a

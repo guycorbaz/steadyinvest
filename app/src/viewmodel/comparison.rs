@@ -18,6 +18,7 @@ use steadyinvest_core::normalize::CanonicalYear;
 use steadyinvest_core::rounding::DisplayField;
 use steadyinvest_core::ssg::{JudgmentInputs, SsgOutputs, YearValuation, quality_flags_assessable};
 use steadyinvest_report::ComparisonColumn;
+use steadyinvest_report::price_age::{Day, DayZone};
 
 use crate::state;
 use crate::viewmodel::engine::{
@@ -49,12 +50,12 @@ pub fn missing_column(label: &str) -> ComparisonColumn {
 /// The column of a study that reads but whose frame does not compute (`build_frame` refused its
 /// inputs): the study's own header facts, every row « non calculable » — neither a read failure
 /// nor an absence; the study exists and can be opened to see why.
-pub fn uncomputable_column(study: &Study) -> ComparisonColumn {
+pub fn uncomputable_column(study: &Study, zone: DayZone) -> ComparisonColumn {
     ComparisonColumn {
         ticker: study.security_ticker.to_uppercase(),
         name: study.company_name.clone().unwrap_or_default(),
         currency: study.native_currency.to_uppercase(),
-        date: study.created_at.0.chars().take(10).collect(),
+        date: zone.shown(&study.created_at, Day::iso),
         unavailable: true,
         uncomputable: true,
         rows: vec![String::new(); 30],
@@ -69,9 +70,10 @@ fn exchange_of(ticker: &str) -> String {
 }
 
 /// The latest PROVIDER timestamp among the study's filled cells (the form's « date of source
-/// material »), `YYYY-MM-DD`; `None` when no provider figure is held — then row 29 is « — »,
-/// never the creation date passed off as the data's date (G1, #237).
-fn latest_provider_date(study: &Study) -> Option<String> {
+/// material »), `YYYY-MM-DD` in the owner's zone (owner decision, Guy 2026-10-03); `None` when no
+/// provider figure is held — then row 29 is « — », never the creation date passed off as the
+/// data's date (G1, #237).
+fn latest_provider_date(study: &Study, zone: DayZone) -> Option<String> {
     study
         .years
         .iter()
@@ -85,7 +87,7 @@ fn latest_provider_date(study: &Study) -> Option<String> {
         .filter(|c| c.value.is_some() && c.provenance.source == Source::Provider)
         .map(|c| c.provenance.timestamp.0.clone())
         .max()
-        .map(|ts| ts.chars().take(10).collect())
+        .map(|ts| zone.shown(&steadyinvest_contract::Timestamp(ts), Day::iso))
 }
 
 /// Rows 9 / 11 / 15 are labelled « sur 5 ans »: a shorter window (a low-confidence study) is
@@ -181,11 +183,13 @@ fn range(
     }
 }
 
-/// One study → its thirty rows, from the frame the study screen shows.
+/// One study → its thirty rows, from the frame the study screen shows; its dates read in `zone`,
+/// the owner's local time (owner decision, Guy 2026-10-03).
 pub fn comparison_column(
     study: &Study,
     frame: &crate::viewmodel::engine::StudyFrame,
     format: NumberFormat,
+    day_zone: DayZone,
 ) -> ComparisonColumn {
     let outputs = frame.snapshot.outputs();
     let j = &study.judgment;
@@ -262,14 +266,14 @@ pub fn comparison_column(
         empty_if_dash(fmt_pct(v.avg_payout_pct, format)), // 26
         flags,                                            // 27
         String::new(),                                    // 28 (key)
-        latest_provider_date(study).unwrap_or_default(),  // 29
+        latest_provider_date(study, day_zone).unwrap_or_default(), // 29
         exchange_of(&study.security_ticker),              // 30
     ];
     ComparisonColumn {
         ticker: study.security_ticker.to_uppercase(),
         name: study.company_name.clone().unwrap_or_default(),
         currency: study.native_currency.to_uppercase(),
-        date: study.created_at.0.chars().take(10).collect(),
+        date: day_zone.shown(&study.created_at, Day::iso),
         rows,
         zone: zone_position_key(r, current).to_string(),
         state: verdict_state(frame.snapshot.verdict()).to_string(),
@@ -330,7 +334,7 @@ mod tests {
         assert_eq!(m.rows.len(), 30);
         // A study that reads but does not compute keeps its facts, and its own state.
         let study = demo_study().unwrap();
-        let u = uncomputable_column(&study);
+        let u = uncomputable_column(&study, DayZone::UTC);
         assert!(u.uncomputable && u.unavailable && !u.missing);
         assert_eq!(u.ticker, "DÉMO");
         assert_eq!(u.date, "2026-01-01");
@@ -359,7 +363,7 @@ mod tests {
         let study = demo_study().unwrap();
         let frame = build_frame(&study).unwrap();
         let o = frame.snapshot.outputs();
-        let col = comparison_column(&study, &frame, F);
+        let col = comparison_column(&study, &frame, F, DayZone::UTC);
         assert_eq!(col.rows.len(), 30);
         let growth = growth_computed(o, F);
         assert_eq!(col.rows[0], dash_free(growth.sales_cagr.to_string()));
@@ -421,7 +425,7 @@ mod tests {
             o.valuation.avg_high_pe,
             "the worked example tells the two apart"
         );
-        let col = comparison_column(&study, &frame, F);
+        let col = comparison_column(&study, &frame, F, DayZone::UTC);
         let high = j.judged_avg_high_pe.unwrap().as_decimal();
         let est_high = o.growth.estimated_high_eps.unwrap();
         assert_eq!(o.risk_reward.forecast_high, Some(high * est_high));
@@ -449,7 +453,7 @@ mod tests {
         study.judgment.judged_avg_high_pe = None;
         study.judgment.projected_sales_growth_pct = None;
         let frame = build_frame(&study).unwrap();
-        let col = comparison_column(&study, &frame, F);
+        let col = comparison_column(&study, &frame, F, DayZone::UTC);
         assert_eq!(col.rows[11], "");
         assert_eq!(col.rows[1], "");
     }
@@ -469,7 +473,7 @@ mod tests {
         let frame = build_frame(&study).unwrap();
         let o = frame.snapshot.outputs();
         let v = &o.valuation;
-        let col = comparison_column(&study, &frame, F);
+        let col = comparison_column(&study, &frame, F, DayZone::UTC);
         // Row 8 = the average annual EPS × 5.
         let eps5 = o.returns.avg_annual_eps.unwrap() * Decimal::from(5);
         assert_eq!(col.rows[7], fmt(Some(eps5), DisplayField::PerShare, F));
@@ -610,7 +614,7 @@ mod tests {
     fn rows_5_and_6_carry_the_years_actually_averaged() {
         let study = demo_study().unwrap();
         let frame = build_frame(&study).unwrap();
-        let col = comparison_column(&study, &frame, F);
+        let col = comparison_column(&study, &frame, F, DayZone::UTC);
         let m = &frame.snapshot.outputs().management;
         assert_eq!(col.ptp_avg_years, m.ptp_avg_years);
         assert_eq!(col.roe_avg_years, m.roe_avg_years);
@@ -629,7 +633,7 @@ mod tests {
     fn row_29_is_the_provider_date_never_the_creation_date() {
         let mut study = demo_study().unwrap();
         let frame = build_frame(&study).unwrap();
-        let col = comparison_column(&study, &frame, F);
+        let col = comparison_column(&study, &frame, F, DayZone::UTC);
         assert_eq!(col.rows[28], "2026-01-01");
         // Only a FILLED provider cell dates the data: an empty one stamped later does not.
         let later = steadyinvest_contract::Timestamp("2027-03-01T00:00:00Z".into());
@@ -637,9 +641,15 @@ mod tests {
         let cell = &mut probe.years[0].sales;
         cell.provenance.timestamp = later.clone();
         cell.value = None;
-        assert_eq!(latest_provider_date(&probe).as_deref(), Some("2026-01-01"));
+        assert_eq!(
+            latest_provider_date(&probe, DayZone::UTC).as_deref(),
+            Some("2026-01-01")
+        );
         probe.years[0].sales.value = study.years[0].sales.value;
-        assert_eq!(latest_provider_date(&probe).as_deref(), Some("2027-03-01"));
+        assert_eq!(
+            latest_provider_date(&probe, DayZone::UTC).as_deref(),
+            Some("2027-03-01")
+        );
         // A study with no provider figure: « — », not the creation date passed off as data's.
         for y in &mut study.years {
             for c in [
@@ -662,7 +672,7 @@ mod tests {
             }
         }
         let frame = build_frame(&study).unwrap();
-        let col = comparison_column(&study, &frame, F);
+        let col = comparison_column(&study, &frame, F, DayZone::UTC);
         assert_eq!(col.rows[28], "");
         assert_eq!(
             col.date, "2026-01-01",

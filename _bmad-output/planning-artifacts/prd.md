@@ -89,6 +89,8 @@ editHistory:
     changes: "Owner decisions on PR #293 (Guy 2026-10-03): FR12 + Appendix A — a current price with no recorded origin has an unknown date and counts as stale (« Prix actuel — date inconnue », traceability, PDF, MCP `computed.price_age`); the trading day is counted in local time; no holiday calendar, limitation accepted. The « Décision en attente (Guy) » on these points is replaced by the decided rule, tagged « réconcilié 2026-10-03 »."
   - date: '2026-10-03'
     changes: "PR #293 brought up to date with main (PR #289, PR #291), then decisions C and D carried to the shown dates: Appendix A — an origin whose date cannot be read counts as an unknown date (« date inconnue », stale, its source named), and the date shown for a price origin in the traceability and the study PDF is the local day the age counts from (« séance du … » stays the provider's date). Tagged « réconcilié 2026-10-03 »."
+  - date: '2026-10-03'
+    changes: "Owner decisions (Guy 2026-10-03): Appendix A — an undefined U/D ratio (price ≤ forecast low) reads « ∞ » on every screen (« illimité » in the PDFs, whose font has no such glyph), « — » staying for an unknown one; every shown date or time of a recorded instant is local (traceability, frozen verdict, history, lists, comparison, review, quick screen, holdings), typed calendar dates and session dates shown as given. Tagged « réconcilié 2026-10-03 »."
 ---
 
 # Product Requirements Document - steadyinvest
@@ -1149,6 +1151,19 @@ withholding-refund tracking, export/share, eventual public release.
 - **Scalability:** single-user, local, no growth/traffic concerns — intentionally out of scope.
 
 ## Appendix A — Definitions (pinned values referenced by FRs)
+
+- **Undefined upside/downside ratio (FR4, FR52–FR54; réconcilié 2026-10-03 : décision Guy):** a current price at or below the forecast low leaves no downside while the upside is positive (`UpsideDownside::Undefined`)
+  — the ratio is unbounded, the most favourable case, not an absence: every screen shows « ∞ »
+  (study, scenarios, comparison, review, frozen verdict, study list — sorted above every ratio —,
+  replacement candidates); the PDFs print « illimité » (their font has no « ∞ » glyph); an unknown
+  ratio stays « — ». The U/D criterion (≥ 3) is unchanged by this display. The MCP keeps its code
+  (`upside_downside: null`, `ud_state: "undefined"`).
+- **Shown dates (réconcilié 2026-10-03 : décision Guy):** dates are stored in UTC and every date or
+  time shown of a recorded instant is the owner's **local** one, read in the same zone as the
+  price's age (FR23) — the traceability (« dernière mise à jour le … »), the frozen verdict
+  (« Verdict figé le … », screen and study PDF), the history, the study list, the comparison, the
+  review, the quick screen, the holdings. Dates the owner types (transactions, dividends, FX rates)
+  and a provider's session date are shown as given.
 
 - **Capital-at-risk (single portfolio, FR43):** Σ over holdings of `max(0, (avg_cost − stop)) ×
   qty`, counted only where `stop ≤ avg_cost`; per currency natively, converted at current FX for the

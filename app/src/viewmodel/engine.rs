@@ -291,14 +291,18 @@ pub(crate) fn fmt_trend(trend: Option<Trend>) -> String {
     }
 }
 
-/// The U/D ratio as a fact-stating string: `Ratio(d)` → "3,4:1"; `Undefined`/`Unknown` → a stating
+/// THE U/D formatter of every screen (study, scenarios, comparison, review, frozen verdict, study
+/// list, replacement candidates): `Ratio(d)` → "3,4:1"; `Undefined` → « ∞ »
+/// ([`steadyinvest_report::UD_UNBOUNDED`] — the price at or below the forecast low, the most
+/// favourable case, never an absence: owner decision, Guy 2026-10-03); `Unknown` → a stating
 /// em-dash (never a fabricated ratio).
 pub(crate) fn fmt_ud(ud: &UpsideDownside, format: NumberFormat) -> String {
     match ud {
         UpsideDownside::Ratio(d) => {
             format!("{}:1", format_scaled(*d, DisplayField::Ratio, format))
         }
-        UpsideDownside::Undefined | UpsideDownside::Unknown => EMPTY_SLOT.to_string(),
+        UpsideDownside::Undefined => steadyinvest_report::UD_UNBOUNDED.to_string(),
+        UpsideDownside::Unknown => EMPTY_SLOT.to_string(),
     }
 }
 
@@ -682,6 +686,7 @@ pub fn verdict_badge(
     study: &Study,
     snapshot: &StudySnapshot,
     format: NumberFormat,
+    zone: DayZone,
 ) -> VerdictState {
     let outputs = snapshot.outputs();
     let verdict = snapshot.verdict();
@@ -691,7 +696,7 @@ pub fn verdict_badge(
     // date-stamp — its honest surface is the named open gates, not a provenance date. Only
     // `Provisional` carries the DD/MM.
     let provenance_date = if matches!(verdict, Verdict::Provisional(_)) {
-        provenance_dd_mm(study)
+        provenance_dd_mm(study, zone)
     } else {
         String::new()
     };
@@ -801,6 +806,7 @@ pub fn verdict_trace(
             DisplayField::PerShare,
             format,
             j.ai_placed.estimated_high_eps.as_ref(),
+            zone,
         )
         .into(),
         trace_input(
@@ -809,6 +815,7 @@ pub fn verdict_trace(
             DisplayField::PerShare,
             format,
             j.ai_placed.estimated_low_eps.as_ref(),
+            zone,
         )
         .into(),
         trace_input(
@@ -817,6 +824,7 @@ pub fn verdict_trace(
             DisplayField::PeRatio,
             format,
             j.ai_placed.judged_avg_high_pe.as_ref(),
+            zone,
         )
         .into(),
         trace_input(
@@ -825,10 +833,11 @@ pub fn verdict_trace(
             DisplayField::PeRatio,
             format,
             j.ai_placed.judged_avg_low_pe.as_ref(),
+            zone,
         )
         .into(),
         trace_price(j, format, zone).into(),
-        trace_yearly(study).into(),
+        trace_yearly(study, zone).into(),
     ];
     if let Some(line) = trace_listing_subunit(study) {
         inputs.push(line.into());
@@ -858,6 +867,7 @@ fn trace_input(
     field: DisplayField,
     format: NumberFormat,
     ai: Option<&steadyinvest_contract::AiOrigin>,
+    zone: DayZone,
 ) -> String {
     let shown = match value {
         Some(m) => format_scaled(m.as_decimal(), field, format),
@@ -868,19 +878,20 @@ fn trace_input(
     match ai {
         Some(origin) => format!(
             "{label} : {shown} ({})",
-            TRACE_AI_VALIDATED.replace("{}", &trace_date(&origin.validated_at.0))
+            TRACE_AI_VALIDATED.replace("{}", &trace_date(&origin.validated_at.0, zone))
         ),
         None => format!("{label} : {shown} ({PROVENANCE_MANUAL})"),
     }
 }
 
-/// « 2026-09-30… » → « 30/09/2026 » (the date part of an RFC 3339 stamp or a session date).
-fn trace_date(stamp: &str) -> String {
-    let d = stamp.get(..10).unwrap_or(stamp);
-    match (d.get(..4), d.get(5..7), d.get(8..10)) {
-        (Some(y), Some(m), Some(day)) => format!("{day}/{m}/{y}"),
-        _ => d.to_string(),
-    }
+/// An RFC 3339 stamp → « 30/09/2026 », its day in `zone` — the owner's local time (owner decision,
+/// Guy 2026-10-03: the « dernière mise à jour le … » and « validé le … » dates, as the price
+/// origin's).
+fn trace_date(stamp: &str, zone: DayZone) -> String {
+    zone.shown(
+        &steadyinvest_contract::Timestamp(stamp.to_string()),
+        steadyinvest_report::price_age::Day::jj_mm_aaaa,
+    )
 }
 
 /// The current price's traceability line (Guy's on-screen test 2026-10-01, FR11): its real
@@ -942,7 +953,7 @@ fn trace_listing_subunit(study: &Study) -> Option<String> {
 /// The yearly data's provenance in one line (FR11): how many filled cells came from the provider
 /// (with the latest update date and how many are stale), from the owner's typing, from the
 /// calculation, or from a validated AI proposal — each counted under its own name.
-fn trace_yearly(study: &Study) -> String {
+fn trace_yearly(study: &Study, zone: DayZone) -> String {
     use steadyinvest_contract::{Freshness, Source};
     let (mut provider, mut stale, mut typed, mut derived, mut ai) = (0usize, 0, 0, 0, 0);
     let mut latest: Option<&str> = None;
@@ -981,7 +992,7 @@ fn trace_yearly(study: &Study) -> String {
         parts.push(
             TRACE_YEARLY_PROVIDER
                 .replacen("{}", &provider.to_string(), 1)
-                .replacen("{}", &trace_date(latest.unwrap_or_default()), 1),
+                .replacen("{}", &trace_date(latest.unwrap_or_default(), zone), 1),
         );
         if stale > 0 {
             parts.push(TRACE_YEARLY_STALE.replace("{}", &stale.to_string()));
@@ -1209,8 +1220,9 @@ pub fn study_incomplete(snapshot: &StudySnapshot) -> bool {
 }
 
 /// The provenance date (DD/MM) of the most recent load-bearing cell edit, or the study's creation
-/// date when no cell has been entered — the temporal-provenance caption's source (FR11).
-fn provenance_dd_mm(study: &Study) -> String {
+/// date when no cell has been entered — the temporal-provenance caption's source (FR11); its day
+/// in `zone`, the owner's local time (owner decision, Guy 2026-10-03).
+fn provenance_dd_mm(study: &Study, zone: DayZone) -> String {
     let latest = study
         .years
         .iter()
@@ -1228,18 +1240,10 @@ fn provenance_dd_mm(study: &Study) -> String {
         .filter(|ts| !ts.is_empty())
         .max();
     let ts = latest.unwrap_or_else(|| study.created_at.0.clone());
-    dd_mm(&ts)
-}
-
-/// "YYYY-MM-DDT…" → "DD/MM"; a non-RFC3339 string passes through unchanged (a display transform).
-fn dd_mm(ts: &str) -> String {
-    let date = ts.split('T').next().unwrap_or(ts);
-    let parts: Vec<&str> = date.split('-').collect();
-    if parts.len() >= 3 {
-        format!("{}/{}", parts[2], parts[1])
-    } else {
-        ts.to_string()
-    }
+    zone.shown(
+        &steadyinvest_contract::Timestamp(ts),
+        steadyinvest_report::price_age::Day::jj_mm,
+    )
 }
 
 // ── User-facing label inventory (Story 2.6) — scanned by the posture gate (FR13). Fact-stating
@@ -1445,6 +1449,25 @@ mod tests {
 
     /// G1 (#237): the §2 average column says the years actually averaged, never « 5 ans » over
     /// three; two different spans leave the title « Moyenne » and each cell names its own.
+    #[test]
+    fn fmt_ud_shows_the_unbounded_symbol_for_an_undefined_ratio_and_a_dash_when_unknown() {
+        // Owner decision (Guy, 2026-10-03): ONE formatter, ONE symbol on every screen.
+        let f = NumberFormat::default();
+        assert_eq!(fmt_ud(&UpsideDownside::Undefined, f), "∞");
+        assert_eq!(
+            fmt_ud(&UpsideDownside::Undefined, f),
+            steadyinvest_report::UD_UNBOUNDED
+        );
+        assert_eq!(fmt_ud(&UpsideDownside::Unknown, f), EMPTY_SLOT);
+        assert_eq!(
+            fmt_ud(
+                &UpsideDownside::Ratio(Decimal::from_str_exact("3.4").unwrap()),
+                f
+            ),
+            "3,4:1"
+        );
+    }
+
     #[test]
     fn the_average_column_title_says_the_years_averaged() {
         assert_eq!(avg_years_title(Some(5), Some(5)), Some(5));
@@ -1933,9 +1956,22 @@ mod tests {
     }
 
     #[test]
-    fn dd_mm_extracts_day_and_month() {
-        assert_eq!(dd_mm("2026-06-13T09:00:00Z"), "13/06");
-        assert_eq!(dd_mm("weird"), "weird");
+    fn shown_dates_read_the_stamp_in_the_owners_zone_never_the_machines() {
+        // Owner decision (Guy, 2026-10-03): every shown date is local — fixed offsets here.
+        use steadyinvest_report::price_age::Day;
+        let t = |s: &str| Timestamp(s.to_string());
+        assert_eq!(
+            DayZone::UTC.shown(&t("2026-06-13T09:00:00Z"), Day::jj_mm),
+            "13/06"
+        );
+        assert_eq!(DayZone::UTC.shown(&t("weird"), Day::jj_mm), "weird");
+        let late = t("2026-09-30T23:30:00Z");
+        let zurich_summer = DayZone::FixedSecondsEast(2 * 3600);
+        let new_york = DayZone::FixedSecondsEast(-4 * 3600);
+        assert_eq!(zurich_summer.shown(&late, Day::jj_mm), "01/10");
+        assert_eq!(new_york.shown(&late, Day::jj_mm), "30/09");
+        assert_eq!(trace_date(&late.0, zurich_summer), "01/10/2026");
+        assert_eq!(trace_date(&late.0, DayZone::UTC), "30/09/2026");
     }
 
     /// Task 5 adapter test: `verdict_badge` maps each `Verdict` state → the right state string, and
@@ -1953,7 +1989,7 @@ mod tests {
             full_judgment(),
         );
         let snap = build_snapshot(&full).unwrap();
-        let badge = verdict_badge(&full, &snap, fmt);
+        let badge = verdict_badge(&full, &snap, fmt, DayZone::UTC);
         assert_eq!(badge.state.as_str(), "full");
         assert_eq!(
             badge.provenance_date.as_str(),
@@ -1969,7 +2005,7 @@ mod tests {
         prov_years[2].eps = unreviewed_cell("5");
         let prov = study_with(prov_years, full_judgment());
         let snap = build_snapshot(&prov).unwrap();
-        let badge = verdict_badge(&prov, &snap, fmt);
+        let badge = verdict_badge(&prov, &snap, fmt, DayZone::UTC);
         assert_eq!(badge.state.as_str(), "provisional");
         assert_eq!(
             badge.provenance_date.as_str(),
@@ -1986,7 +2022,7 @@ mod tests {
             },
         );
         let snap = build_snapshot(&withheld).unwrap();
-        let badge = verdict_badge(&withheld, &snap, fmt);
+        let badge = verdict_badge(&withheld, &snap, fmt, DayZone::UTC);
         assert_eq!(badge.state.as_str(), "withheld");
         assert_eq!(
             badge.provenance_date.as_str(),
@@ -2178,7 +2214,7 @@ mod tests {
             full_judgment(),
         );
         let snap = build_snapshot(&thin).unwrap();
-        let badge = verdict_badge(&thin, &snap, fmt);
+        let badge = verdict_badge(&thin, &snap, fmt, DayZone::UTC);
         assert!(badge.low_confidence, "3 usable years is low-confidence");
         assert_eq!(
             badge.confidence_label.as_str(),
@@ -2191,7 +2227,7 @@ mod tests {
             full_judgment(),
         );
         let snap = build_snapshot(&full).unwrap();
-        let badge = verdict_badge(&full, &snap, fmt);
+        let badge = verdict_badge(&full, &snap, fmt, DayZone::UTC);
         assert!(
             !badge.low_confidence,
             "five usable years is full confidence"
@@ -2439,14 +2475,14 @@ mod tests {
     #[test]
     fn the_trace_counts_the_yearly_data_by_origin() {
         let empty = study_with(vec![], full_judgment());
-        assert_eq!(trace_yearly(&empty), "Données annuelles : —");
+        assert_eq!(trace_yearly(&empty, DayZone::UTC), "Données annuelles : —");
         let mut study = study_with(
             vec![year(2023, validated_cell), year(2024, validated_cell)],
             full_judgment(),
         );
         // Typed cells only.
         assert_eq!(
-            trace_yearly(&study),
+            trace_yearly(&study, DayZone::UTC),
             "Données annuelles : 14 cellule(s) manuelle(s)"
         );
         // One fetched cell, one validated AI proposal.
@@ -2459,15 +2495,27 @@ mod tests {
             validated_at: Timestamp("2026-10-01T08:00:00Z".to_string()),
         });
         assert_eq!(
-            trace_yearly(&study),
+            trace_yearly(&study, DayZone::UTC),
             "Données annuelles : 1 cellule(s) du fournisseur (dernière mise à jour le 30/09/2026) · \
              12 cellule(s) manuelle(s) · 1 cellule(s) proposée(s) par l'IA et validée(s)"
         );
+        // The update's day in the owner's zone (owner decision, Guy 2026-10-03): 08:00 UTC is
+        // still 30/09 in New York; 23:30 UTC is 01/10 in Zurich.
+        study.years[0].sales.provenance.timestamp = Timestamp("2026-09-30T23:30:00Z".to_string());
+        assert!(
+            trace_yearly(&study, DayZone::FixedSecondsEast(2 * 3600))
+                .contains("dernière mise à jour le 01/10/2026")
+        );
+        assert!(
+            trace_yearly(&study, DayZone::FixedSecondsEast(-4 * 3600))
+                .contains("dernière mise à jour le 30/09/2026")
+        );
+        study.years[0].sales.provenance.timestamp = Timestamp("2026-09-30T08:00:00Z".to_string());
         // A stale fetched cell is counted as such; a derived one is never passed off as typed.
         study.years[0].sales.freshness = Freshness::Stale;
         study.years[0].eps.source = Source::Derived;
         assert_eq!(
-            trace_yearly(&study),
+            trace_yearly(&study, DayZone::UTC),
             "Données annuelles : 1 cellule(s) du fournisseur (dernière mise à jour le 30/09/2026) · \
              dont 1 périmée(s) · 11 cellule(s) manuelle(s) · 1 cellule(s) calculée(s) · \
              1 cellule(s) proposée(s) par l'IA et validée(s)"
@@ -2489,7 +2537,8 @@ mod tests {
                 v,
                 DisplayField::PeRatio,
                 NumberFormat::Comma,
-                None
+                None,
+                DayZone::UTC
             ),
             "PER haut moyen : 45,1 (manuel)"
         );
@@ -2499,9 +2548,26 @@ mod tests {
                 v,
                 DisplayField::PeRatio,
                 NumberFormat::Comma,
-                Some(&origin)
+                Some(&origin),
+                DayZone::UTC
             ),
             "PER haut moyen : 45,1 (proposé par l'IA, validé le 30/09/2026)"
+        );
+        // Validated at 23:30 UTC: the next day in Zurich (owner decision, Guy 2026-10-03).
+        let late = steadyinvest_contract::AiOrigin {
+            validated_at: Timestamp("2026-09-30T23:30:00Z".to_string()),
+            ..origin.clone()
+        };
+        assert_eq!(
+            trace_input(
+                "PER haut moyen",
+                v,
+                DisplayField::PeRatio,
+                NumberFormat::Comma,
+                Some(&late),
+                DayZone::FixedSecondsEast(2 * 3600)
+            ),
+            "PER haut moyen : 45,1 (proposé par l'IA, validé le 01/10/2026)"
         );
         assert_eq!(
             trace_input(
@@ -2509,7 +2575,8 @@ mod tests {
                 None,
                 DisplayField::PeRatio,
                 NumberFormat::Comma,
-                None
+                None,
+                DayZone::UTC
             ),
             "PER haut moyen : —"
         );

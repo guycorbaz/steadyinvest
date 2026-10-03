@@ -152,19 +152,31 @@ pub fn causes(
     out.join(", ")
 }
 
+/// A frozen U/D as the engine's own value, so the frozen verdict prints through the SAME U/D
+/// formatter as the live one (« ∞ » for an undefined ratio — owner decision, Guy 2026-10-03).
+pub fn upside_downside(
+    ud: &steadyinvest_contract::FrozenUpsideDownside,
+) -> steadyinvest_core::ssg::UpsideDownside {
+    use steadyinvest_contract::FrozenUpsideDownside as F;
+    use steadyinvest_core::ssg::UpsideDownside as U;
+    match ud {
+        F::Ratio(r) => U::Ratio(r.as_decimal()),
+        F::Undefined => U::Undefined,
+        F::Unknown => U::Unknown,
+    }
+}
+
 /// The frozen verdict and today's differ (G3: ONE rule for the screen and the PDF) — in a value,
 /// the hash or the method, or the current verdict is no longer full.
 pub fn differs(frozen: &FrozenVerdict, current: &FrozenVerdict, current_full: bool) -> bool {
     !current_full || !same(frozen, current)
 }
 
-/// JJ/MM of a stamp — its UTC date, as the history's day headers (G3: one date on every surface).
-pub fn day_month(t: &Timestamp) -> String {
-    let d: String = t.0.chars().take(10).collect();
-    match (d.get(5..7), d.get(8..10)) {
-        (Some(m), Some(day)) => format!("{day}/{m}"),
-        _ => d,
-    }
+/// JJ/MM of a stamp — its day in `zone`, the owner's local time in the app (owner decision, Guy
+/// 2026-10-03: every shown date is local, as the history's day headers — G3: one date on every
+/// surface); the PDFs default to UTC for a deterministic render.
+pub fn day_month(t: &Timestamp, zone: crate::price_age::DayZone) -> String {
+    zone.shown(t, crate::price_age::Day::jj_mm)
 }
 
 fn year_cells(y: &steadyinvest_contract::YearData) -> Vec<&steadyinvest_contract::Cell> {
@@ -303,7 +315,7 @@ mod tests {
             &verdict(method),
             &changed,
             open,
-            &day_month,
+            &|t| day_month(t, crate::price_age::DayZone::UTC),
         )
     }
 
@@ -379,9 +391,10 @@ mod tests {
             differs(&v, &v, false),
             "same figures, no longer full: differs"
         );
-        assert_eq!(
-            day_month(&Timestamp("2026-09-30T23:30:00Z".to_string())),
-            "30/09"
-        );
+        // The day in the zone given — never the machine's (fixed offsets).
+        let late = Timestamp("2026-09-30T23:30:00Z".to_string());
+        assert_eq!(day_month(&late, crate::price_age::DayZone::UTC), "30/09");
+        let zurich_summer = crate::price_age::DayZone::FixedSecondsEast(2 * 3600);
+        assert_eq!(day_month(&late, zurich_summer), "01/10");
     }
 }
