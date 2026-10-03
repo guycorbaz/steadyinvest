@@ -271,12 +271,17 @@ ZAc → ZAR; ILA → ILS — exact codes, the case carries the meaning) is **con
 (ingestion, before normalization): every price figure — each year's high and low, the latest close,
 the price-only holdings close — is divided by 100 exactly (decimal, never rounded), the listing
 currency becomes the major one, and the provider's code is recorded on the study and named in the
-traceability. Statement figures (sales, EPS, dividend and book value per share, trailing EPS) are
-taken to be served in the major currency and are never divided; a statement amount that states no
+traceability. Statement figures (sales, EPS, dividend and book value per share) and the trailing
+EPS are served in a major currency and are never divided; a statement amount that states no
 currency of its own is labelled in the major currency, not in the hundredths code (réconcilié
-2026-10-03 : revue PR #291). Décision en attente (Guy) : que les états financiers et le BPA sur
-douze mois d'une cotation en centièmes soient bien servis dans la devise principale est une
-hypothèse, à vérifier sur une récupération réelle. The price-only refresh of a holding converts its
+2026-10-03 : revue PR #291). Vérifié 2026-10-03 sur ULVR.LSE (the one real fetch the owner
+authorised): the listing is `GBX` (latest close 4483.5 pence); `Highlights.EarningsShare` 2.18 is in
+GBP — the response's own P/E 20.5665 is 44.835 GBP ÷ 2.18 — and the served dividend figures are in
+GBP as well; the statements carry their own `currency_symbol`. A London listing may report its
+statements in a **third currency** — Unilever reports in EUR: neither the pence nor the pounds of
+its listing. Those statements are neither divided nor relabelled; they fall under the
+mixed-currency rule below (applied with the named warning « comptes publiés en EUR, cotation en
+GBP »), while the trailing EPS stays in the listing's major currency. The price-only refresh of a holding converts its
 close when the study's last fetch recorded the hundredths code; when the unit is **unknown** — the
 linked study was never fetched from the provider (typed, from an AI draft) and its venue quotes in
 hundredths (London, Johannesburg, Tel Aviv) — the close is **refused**, named, and nothing is

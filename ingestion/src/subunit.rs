@@ -15,9 +15,12 @@
 //!   A statement amount that states no currency of its own carries the listing code as its label
 //!   (the adapter's fallback): it is RELABELLED to the major currency, never divided — a figure
 //!   served in the major unit under the listing's label (PR #291 review). Left as `GBX`, it would
-//!   raise a spurious `currency_mismatch` and « comptes publiés en GBX, cotation en GBP ». That
-//!   the statements and the trailing EPS are in the major unit is the working assumption pending
-//!   a real fetch's verification (owner decision pending).
+//!   raise a spurious `currency_mismatch` and « comptes publiés en GBX, cotation en GBP ».
+//!   Verified 2026-10-03 on ULVR.LSE (the one real fetch the owner authorised): `GBX` listing,
+//!   close 4483.5 pence; `Highlights.EarningsShare` 2.18 in GBP (the served P/E 20.5665 =
+//!   44.835 ÷ 2.18); statements in EUR, their own `currency_symbol` — a third currency, left as
+//!   served, which takes the mixed-currency warning. Pinned on the trimmed extract
+//!   `tests/fixtures/eodhd-*-ULVR-real.json` (`adapters::eodhd` tests).
 //! - Twelve Data (`GBp`) serves prices only (no fundamentals on the free tier): converted.
 
 use rust_decimal::Decimal;

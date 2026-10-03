@@ -1225,4 +1225,110 @@ mod tests {
         );
         assert_eq!(fin.native_currency, "CHF");
     }
+
+    /// Owner decision 2026-10-01 (PR #291), verified 2026-10-03 on ULVR.LSE — the one real fetch
+    /// the owner authorised. `*-ULVR-real.json` are trimmed extracts of that response: only the
+    /// fields this adapter reads, the last twelve fiscal years, the last five `/eod` bars (no key
+    /// in them). What it showed, and what this test pins through the real mapping
+    /// ([`map_fetch`]) and the real conversion ([`crate::fetch_canonical`]):
+    /// - `General.CurrencyCode` is `GBX`: the `/eod` bars are in pence (close 4483.5 on
+    ///   2026-10-02) → divided by 100, the listing becomes `GBP`, the record keeps `GBX`;
+    /// - `Highlights.EarningsShare` 2.18 is in POUNDS: the response's own `PERatio` 20.5665 is
+    ///   44.835 GBP ÷ 2.18 (in pence it would read 2056.65) → never divided;
+    /// - the statements state `currency_symbol` EUR (Unilever reports in euros): a third currency,
+    ///   neither the listing's pence nor its pounds — left as served, they raise the existing
+    ///   mixed-currency path (`currency_mismatch`, `reported_currencies` → the named warning
+    ///   « comptes publiés en EUR, cotation en GBP », accepted by the owner's decision).
+    ///
+    /// The `/splits` body was not recorded: the 8:9 consolidation the fundamentals name
+    /// (`LastSplitDate` 2025-12-09) predates every recorded bar, so it rebases none of them — an
+    /// empty history is the same mapping here.
+    #[tokio::test]
+    async fn a_real_london_fetch_has_its_pence_converted_and_its_euro_statements_named() {
+        use crate::fetch::{FakeProvider, Provider, fetch_canonical};
+        use steadyinvest_core::normalize::{Finding, PlausibilityKey};
+
+        let d = |s: &str| Decimal::from_str_exact(s).unwrap();
+        let fundamentals: Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/eodhd-fundamentals-ULVR-real.json"
+        ))
+        .unwrap();
+        let prices: Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/eodhd-eod-ULVR-real.json"
+        ))
+        .unwrap();
+        let now = chrono::DateTime::parse_from_rfc3339("2026-10-03T12:00:00+02:00").unwrap();
+        let raw = map_fetch(&fundamentals, &prices, &json!([]), now, "ULVR.LSE").expect("maps");
+        // The adapter serves the listing as EODHD names it — the conversion is not its job.
+        assert_eq!(raw.financials.native_currency, "GBX");
+        assert_eq!(raw.latest_price, Some(d("4483.5")));
+
+        let provider = Provider::Fake(
+            FakeProvider::returning_with_price(Ok(raw.financials), raw.latest_price)
+                .with_session_date(raw.latest_session_date.as_deref())
+                .with_ttm_eps(raw.ttm_eps)
+                .with_sector(raw.sector.as_deref()),
+        );
+        let fetched = fetch_canonical(&provider, "ULVR.LSE", Some("k"))
+            .await
+            .expect("fetches");
+
+        // Prices: pence → pounds, exactly.
+        assert_eq!(fetched.native_currency, "GBP");
+        assert_eq!(fetched.listing_subunit.as_deref(), Some("GBX"));
+        assert_eq!(fetched.latest_price, Some(d("44.835")), "4483.5 ÷ 100");
+        assert_eq!(fetched.latest_session_date.as_deref(), Some("2026-10-02"));
+        // The fiscal year in progress (2026) holds the five bars: high 4726.5 (09-28), low
+        // 4463.25 (10-01).
+        let y26 = fetched
+            .canonical
+            .years
+            .iter()
+            .find(|y| y.year == 2026)
+            .expect("the year in progress");
+        assert_eq!(y26.high_price, Some(d("47.265")));
+        assert_eq!(y26.low_price, Some(d("44.6325")));
+
+        // The TTM EPS is a fundamental in pounds: unchanged, and the current P/E it gives is
+        // EODHD's own `PERatio` 20.5665 of the same response.
+        assert_eq!(fetched.ttm_eps, Some(d("2.18")));
+        assert_eq!(
+            (d("44.835") / d("2.18")).round_dp(4),
+            d("20.5665"),
+            "price in GBP ÷ TTM EPS = the served PERatio"
+        );
+
+        // The statements stay in EUR, never divided nor relabelled: 2024 sales as served, the EPS
+        // derived from them (5 744 000 000 ÷ 2 228 533 000 = 2.5775 EUR).
+        let y24 = fetched
+            .canonical
+            .years
+            .iter()
+            .find(|y| y.year == 2024)
+            .expect("2024");
+        assert_eq!(y24.sales, Some(d("60761000000.00")));
+        assert_eq!(y24.eps, Some(d("2.5775")));
+        // … and every statement year is named as reported in EUR — the mixed-currency warning's
+        // input — while the price-only year in progress is not.
+        assert_eq!(
+            fetched.reported_currencies,
+            (2014..=2025)
+                .map(|y| (y, "EUR".to_string()))
+                .collect::<Vec<_>>()
+        );
+        assert!(fetched.canonical.findings.contains(&Finding {
+            key: PlausibilityKey::CurrencyMismatch,
+            year: 2024,
+            context: "sales",
+        }));
+        assert!(
+            fetched
+                .canonical
+                .findings
+                .iter()
+                .filter(|f| f.key == PlausibilityKey::CurrencyMismatch)
+                .all(|f| f.year <= 2025),
+            "the converted prices are no mismatch"
+        );
+    }
 }

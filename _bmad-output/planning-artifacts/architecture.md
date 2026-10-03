@@ -485,8 +485,14 @@ against this skeleton as the principal go/no-go before committing UI work.
   predicate `state::price_unit_unknown`): not fetched, nothing applied (price, stop ratchet, price
   history), named (`MSG_HOLDINGS_UNIT_UNKNOWN`). The conversion line (`report::LISTING_SUBUNIT_LINE`)
   is the same in the traceability, the study PDF and the quick screen (réconcilié 2026-10-03 : revue
-  PR #291). **Décision en attente (Guy) : unité des états financiers et du BPA sur douze mois
-  d'une cotation en centièmes — supposée principale, à vérifier sur une récupération réelle.**
+  PR #291). Unit of the fundamentals of a hundredths listing — vérifié 2026-10-03 sur ULVR.LSE:
+  `General.CurrencyCode` `GBX`, `/eod` close 4483.5 (pence); `Highlights.EarningsShare` 2.18 in GBP
+  (the served `PERatio` 20.5665 = 44.835 GBP ÷ 2.18), dividend figures in GBP too → the trailing EPS
+  is never divided; the statement rows state `currency_symbol` EUR (Unilever reports in euros). A
+  London listing may thus report in a **third currency**: its statements are neither divided nor
+  relabelled and take the mixed-currency path below (`currency_mismatch`,
+  `FetchedFinancials.reported_currencies` → « comptes publiés en EUR, cotation en GBP »); pinned by
+  the trimmed real extract `ingestion/tests/fixtures/eodhd-*-ULVR-real.json`.
   Statements reported in another currency than the listing are applied with a named
   **warning**. **Décision en attente (Guy) : comptes publiés dans une autre devise — avertir ou
   bloquer.**
