@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use rust_decimal::Decimal;
+use steadyinvest_core::ssg::{ReturnOutputs, UpsideDownside};
 use steadyinvest_persistence::StudySummary;
 use uuid::Uuid;
 
@@ -28,9 +29,15 @@ pub struct StudyReturn {
     pub display: String,
     pub incomplete: bool,
     pub zone: &'static str,
-    /// Guy's on-screen test (2026-09-30) — the upside/downside ratio as the study shows it
-    /// (`engine::fmt_ud`: « 3,4:1 », « — » when undefined or unknown).
+    /// Guy's on-screen test (2026-09-30) — the upside/downside ratio, built by [`ud_facts`]. The
+    /// list deliberately DIFFERS from the study screen in two places (Guy, 2026-10-01/03): a
+    /// withheld verdict lists « — » (the study screen still shows the engine's ratio over the open
+    /// inputs), and an undefined ratio (price ≤ forecast low) lists « ∞ » (the study screen shows
+    /// « — »). An unknown ratio is « — » on both.
     pub ud: String,
+    /// Guy, 2026-10-01/03 (« Tri : U/D »): the sort value behind `ud` — `None` exactly when `ud`
+    /// reads « — » (withheld verdict or unknown ratio), which sorts LAST in both directions.
+    pub ud_value: Option<UdRank>,
     /// 2026-07-12 — the study's user-entered company name (empty when unset), shown after the
     /// ticker on the list row. Owned (read off the full study during refresh, not the summary).
     pub company_name: String,
@@ -46,11 +53,83 @@ impl Default for StudyReturn {
             value: None,
             display: crate::viewmodel::form::EMPTY_SLOT.to_string(),
             ud: crate::viewmodel::form::EMPTY_SLOT.to_string(),
+            ud_value: None,
             incomplete: false,
             zone: "",
             company_name: String::new(),
         }
     }
+}
+
+/// The list's « no value » cell: the faithful em-dash and nothing to sort on — it sorts LAST in
+/// both directions (`curate`).
+fn no_value<T>() -> (String, Option<T>) {
+    (crate::viewmodel::form::EMPTY_SLOT.to_string(), None)
+}
+
+/// THE « withheld → no value » rule (Guy, 2026-10-03, decision B), shared by the potentiel and
+/// U/D columns: a study whose verdict is withheld (`incomplete` — a MISSING load-bearing input)
+/// lists « — » and no sort value, even when the engine could state a figure over the inputs it
+/// has — the list does not rank on figures built over open inputs. Deliberately unlike the study
+/// screen, which still shows those figures beside the withheld verdict. Otherwise `stated` decides.
+pub fn unless_withheld<T>(
+    incomplete: bool,
+    stated: impl FnOnce() -> (String, Option<T>),
+) -> (String, Option<T>) {
+    if incomplete { no_value() } else { stated() }
+}
+
+/// The list's U/D cell for an undefined ratio (Guy, 2026-10-03, decision A): the current price is
+/// at or below the forecast low — no downside left while the upside is positive (`Undefined`
+/// implies `forecast_high > forecast_low`, else the core says `Unknown`), so the ratio is
+/// unbounded. A symbol, not prose (like `EMPTY_SLOT`).
+pub const UD_UNBOUNDED: &str = "∞";
+
+/// The U/D sort value (Guy, 2026-10-03): a stated ratio, or the unbounded one, which ranks above
+/// every ratio (variant order: `Ratio < Unbounded`, ratios by exact decimal) — first in descending
+/// order, last in ascending.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum UdRank {
+    Ratio(Decimal),
+    Unbounded,
+}
+
+/// The list's U/D facts: the displayed ratio and its sort value. Withheld verdict → « — », no
+/// value ([`unless_withheld`]); `Ratio` → « 3,4:1 » (`engine::fmt_ud`); `Undefined` → « ∞ »,
+/// ranked as +∞ (decision A — the MOST favourable case, not an absence); `Unknown` → « — », no
+/// value.
+pub fn ud_facts(
+    ud: &UpsideDownside,
+    incomplete: bool,
+    format: crate::viewmodel::format::NumberFormat,
+) -> (String, Option<UdRank>) {
+    unless_withheld(incomplete, || match ud {
+        UpsideDownside::Ratio(d) => (
+            crate::viewmodel::engine::fmt_ud(ud, format),
+            Some(UdRank::Ratio(*d)),
+        ),
+        UpsideDownside::Undefined => (UD_UNBOUNDED.to_string(), Some(UdRank::Unbounded)),
+        UpsideDownside::Unknown => no_value(),
+    })
+}
+
+/// The list's potentiel facts (issue #107, #189; Guy, 2026-10-03, decision B): withheld verdict
+/// → « — », no value ([`unless_withheld`], as the U/D column); otherwise the §5 projected total
+/// annualized return, or the appreciation-only fallback marked « (hors div.) » (#189), « — » when
+/// neither is stated.
+pub fn potential_facts(
+    returns: &ReturnOutputs,
+    incomplete: bool,
+    format: crate::viewmodel::format::NumberFormat,
+) -> (String, Option<Decimal>) {
+    unless_withheld(incomplete, || {
+        (
+            crate::viewmodel::engine::fmt_total_return(returns, format),
+            returns
+                .projected_total_annualized_return_pct
+                .or_else(|| returns.appreciation_only_potential()),
+        )
+    })
 }
 
 /// Map one summary row into the Slint `StudyRow` (id stringified, date trimmed to the day, status
@@ -109,15 +188,20 @@ impl StatusFilter {
     }
 }
 
-/// The dashboard sort key (Story 2.12, FR54): created-date or ticker. `id` is always the
-/// deterministic tiebreaker so the list never jitters.
+/// The dashboard sort key (Story 2.12, FR54): created-date, ticker, potential or U/D ratio. `id` is
+/// always the deterministic tiebreaker so the list never jitters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortKey {
     Date,
     Ticker,
     /// Issue #107: the estimated potential (§5 projected total annualized return). Studies whose
-    /// potential is withheld sort LAST in both directions.
+    /// potential is not stated — or whose verdict is withheld (Guy, 2026-10-03, decision B,
+    /// [`potential_facts`]) — sort LAST in both directions.
     PotentialReturn,
+    /// Guy, 2026-10-01/03: the upside/downside ratio (`StudyReturn::ud_value`, [`UdRank`]: exact
+    /// decimals, an undefined ratio as +∞ — FIRST descending, last ascending). A study whose
+    /// verdict is withheld or whose ratio is unknown sorts LAST in both directions.
+    UpsideDownside,
 }
 
 impl SortKey {
@@ -126,16 +210,17 @@ impl SortKey {
         match s {
             "ticker" => Self::Ticker,
             "potential" => Self::PotentialReturn,
+            "ud" => Self::UpsideDownside,
             _ => Self::Date,
         }
     }
 }
 
 /// Pure dashboard curation (Story 2.12, FR54): filter by lifecycle status + case-insensitive ticker
-/// substring, then **stable**-sort by date or ticker (asc/desc) with `id` as the deterministic
-/// tiebreaker. No I/O, no calculation (Cardinal Rule) — the testable heart of the dashboard. The
-/// caller passes the persistence `created_at, id`-ordered summaries; tickers/search text are user
-/// data (never posture-scanned).
+/// substring, then **stable**-sort by date, ticker, potential or U/D ratio (asc/desc) with `id` as
+/// the deterministic tiebreaker. No I/O, no calculation (Cardinal Rule) — the testable heart of the
+/// dashboard. The caller passes the persistence `created_at, id`-ordered summaries; tickers/search
+/// text are user data (never posture-scanned).
 pub fn curate(
     summaries: &[StudySummary],
     query: &str,
@@ -153,8 +238,17 @@ pub fn curate(
         .collect();
     kept.sort_by(|a, b| {
         // The primary comparison; the `id` tiebreak + the descending flip are applied after. A
-        // PotentialReturn study with NO computed value sorts LAST in both directions (an early return,
-        // bypassing the flip) — an unknown potential is never a top pick.
+        // PotentialReturn / UpsideDownside study with NO value (withheld verdict, unknown figure)
+        // sorts LAST in both directions (an early return, bypassing the flip) — never a top pick.
+        // An undefined U/D ratio HAS a value (`UdRank::Unbounded`, +∞): it flips like any ratio.
+        fn known_first<T: Ord>(va: Option<T>, vb: Option<T>) -> Result<Ordering, Ordering> {
+            match (va, vb) {
+                (Some(x), Some(y)) => Ok(x.cmp(&y)),
+                (Some(_), None) => Err(Ordering::Less), // known before unknown, always
+                (None, Some(_)) => Err(Ordering::Greater),
+                (None, None) => Ok(Ordering::Equal),
+            }
+        }
         let ord = match sort_key {
             SortKey::Date => a.created_at.0.cmp(&b.created_at.0),
             SortKey::Ticker => a
@@ -164,11 +258,17 @@ pub fn curate(
             SortKey::PotentialReturn => {
                 let va = returns.get(&a.id).and_then(|r| r.value);
                 let vb = returns.get(&b.id).and_then(|r| r.value);
-                match (va, vb) {
-                    (Some(x), Some(y)) => x.cmp(&y),
-                    (Some(_), None) => return Ordering::Less, // known before unknown, always
-                    (None, Some(_)) => return Ordering::Greater,
-                    (None, None) => Ordering::Equal,
+                match known_first(va, vb) {
+                    Ok(ord) => ord,
+                    Err(sunk) => return sunk,
+                }
+            }
+            SortKey::UpsideDownside => {
+                let va = returns.get(&a.id).and_then(|r| r.ud_value);
+                let vb = returns.get(&b.id).and_then(|r| r.ud_value);
+                match known_first(va, vb) {
+                    Ok(ord) => ord,
+                    Err(sunk) => return sunk,
                 }
             }
         }
@@ -229,6 +329,7 @@ mod tests {
             value: Some(Decimal::from_str_exact(value).unwrap()),
             display: display.to_string(),
             ud: "—".to_string(),
+            ud_value: None,
             incomplete: false,
             zone: "",
             company_name: String::new(),
@@ -409,6 +510,293 @@ mod tests {
         assert_eq!(tickers(&asc), vec!["ROG", "NESN", "ABBN"]);
     }
 
+    /// A U/D ratio keyed by the `Uuid::from_u128(id)` the `sm` helper mints (`None` → « — »).
+    fn ud(value: Option<&str>, display: &str) -> StudyReturn {
+        StudyReturn {
+            ud: display.to_string(),
+            ud_value: value.map(|v| UdRank::Ratio(Decimal::from_str_exact(v).unwrap())),
+            ..StudyReturn::default()
+        }
+    }
+
+    /// An undefined U/D ratio (price ≤ forecast low): « ∞ », ranked +∞ (decision A).
+    fn ud_unbounded() -> StudyReturn {
+        StudyReturn {
+            ud: UD_UNBOUNDED.to_string(),
+            ud_value: Some(UdRank::Unbounded),
+            ..StudyReturn::default()
+        }
+    }
+
+    #[test]
+    fn ud_facts_dash_a_withheld_verdict_and_an_unknown_ratio_but_not_an_undefined_one() {
+        let format = crate::viewmodel::format::NumberFormat::default();
+        let ratio = UpsideDownside::Ratio(Decimal::from_str_exact("3.4").unwrap());
+        let (shown, value) = ud_facts(&ratio, false, format);
+        assert_eq!(
+            value,
+            Some(UdRank::Ratio(Decimal::from_str_exact("3.4").unwrap()))
+        );
+        assert_eq!(shown, crate::viewmodel::engine::fmt_ud(&ratio, format));
+        assert!(
+            shown.ends_with(":1"),
+            "a stated ratio reads « …:1 », got {shown}"
+        );
+        // Decision A: an undefined ratio (price ≤ forecast low) is the most favourable case —
+        // « ∞ », ranked above every ratio; never a dash.
+        assert_eq!(
+            ud_facts(&UpsideDownside::Undefined, false, format),
+            ("∞".to_string(), Some(UdRank::Unbounded))
+        );
+        assert!(UdRank::Unbounded > UdRank::Ratio(Decimal::MAX));
+        // Unknown: « — », no value.
+        assert_eq!(
+            ud_facts(&UpsideDownside::Unknown, false, format),
+            ("—".to_string(), None)
+        );
+        // Withheld verdict: whatever the engine has, the list states none.
+        for any in [ratio, UpsideDownside::Undefined, UpsideDownside::Unknown] {
+            assert_eq!(ud_facts(&any, true, format), ("—".to_string(), None));
+        }
+    }
+
+    #[test]
+    fn potential_facts_dash_a_withheld_verdict_through_the_shared_rule() {
+        // Decision B: the potentiel column applies the SAME `unless_withheld` rule as the U/D
+        // column — a withheld verdict lists « — » and no sort value, even over a stated total.
+        let format = crate::viewmodel::format::NumberFormat::default();
+        let dec = |s: &str| Decimal::from_str_exact(s).unwrap();
+        let returns = ReturnOutputs {
+            present_yield_pct: None,
+            avg_annual_eps: Some(dec("2")),
+            avg_annual_dividend: None,
+            avg_yield_pct: None,
+            projected_appreciation_pct: None,
+            projected_annualized_appreciation_pct: Some(dec("20")),
+            projected_total_annualized_return_pct: Some(dec("23.28")),
+        };
+        let (shown, value) = potential_facts(&returns, false, format);
+        assert_eq!(value, Some(dec("23.28")));
+        assert_eq!(
+            shown,
+            crate::viewmodel::engine::fmt_total_return(&returns, format)
+        );
+        assert_eq!(
+            potential_facts(&returns, true, format),
+            ("—".to_string(), None)
+        );
+        // #189's appreciation-only fallback still feeds a complete study…
+        let no_div = ReturnOutputs {
+            projected_total_annualized_return_pct: None,
+            ..returns.clone()
+        };
+        assert_eq!(potential_facts(&no_div, false, format).1, Some(dec("20")));
+        // …and is withheld like the rest when the verdict is.
+        assert_eq!(
+            potential_facts(&no_div, true, format),
+            ("—".to_string(), None)
+        );
+        // The shared rule itself: the stated facts are not even consulted when withheld.
+        let (shown, value): (String, Option<u8>) =
+            unless_withheld(true, || unreachable!("withheld → never stated"));
+        assert_eq!((shown.as_str(), value), ("—", None));
+    }
+
+    #[test]
+    fn sort_by_ud_puts_an_undefined_ratio_first_descending_and_last_ascending() {
+        // Decision A: « ∞ » (undefined: price ≤ forecast low) ranks as +∞ — FIRST descending, LAST
+        // among the known ratios ascending — while the dashes (withheld/unknown) stay last in both
+        // orders. Two « ∞ » tie on `id`, flipped with the direction like any tie.
+        let studies = vec![
+            sm(1, "NESN", "2026-01-10T00:00:00Z", "active"),
+            sm(2, "ROG", "2026-03-02T00:00:00Z", "active"),
+            sm(3, "ABBN", "2026-02-15T00:00:00Z", "active"),
+            sm(4, "UBSG", "2026-04-01T00:00:00Z", "active"),
+            sm(5, "ZURN", "2026-05-01T00:00:00Z", "active"),
+        ];
+        let mut returns = HashMap::new();
+        returns.insert(Uuid::from_u128(1), ud(Some("9.8"), "9,8:1"));
+        returns.insert(Uuid::from_u128(2), ud_unbounded());
+        returns.insert(Uuid::from_u128(3), ud(None, "—"));
+        returns.insert(Uuid::from_u128(4), ud(Some("1000"), "1 000,0:1"));
+        returns.insert(Uuid::from_u128(5), ud_unbounded());
+
+        let desc = curate(
+            &studies,
+            "",
+            SortKey::UpsideDownside,
+            true,
+            StatusFilter::All,
+            &returns,
+        );
+        assert_eq!(
+            tickers(&desc),
+            vec!["ZURN", "ROG", "UBSG", "NESN", "ABBN"],
+            "descending: the two « ∞ » first (id flipped), then the ratios, the dash last"
+        );
+        assert_eq!(desc[0].ud_ratio.to_string(), "∞");
+        assert_eq!(desc[4].ud_ratio.to_string(), "—");
+
+        let asc = curate(
+            &studies,
+            "",
+            SortKey::UpsideDownside,
+            false,
+            StatusFilter::All,
+            &returns,
+        );
+        assert_eq!(
+            tickers(&asc),
+            vec!["NESN", "UBSG", "ROG", "ZURN", "ABBN"],
+            "ascending: the ratios, then the two « ∞ » (id order), the dash STILL last"
+        );
+    }
+
+    #[test]
+    fn sort_by_potential_sinks_a_withheld_verdict_in_both_orders() {
+        // Decision B: a withheld verdict has no potentiel value (`potential_facts`), so it sorts
+        // last in both orders under « Tri : potentiel », even though the engine stated a total.
+        let format = crate::viewmodel::format::NumberFormat::default();
+        let dec = |s: &str| Decimal::from_str_exact(s).unwrap();
+        let outputs = |total: &str| ReturnOutputs {
+            present_yield_pct: None,
+            avg_annual_eps: Some(dec("2")),
+            avg_annual_dividend: None,
+            avg_yield_pct: None,
+            projected_appreciation_pct: None,
+            projected_annualized_appreciation_pct: None,
+            projected_total_annualized_return_pct: Some(dec(total)),
+        };
+        let fact = |total: &str, incomplete: bool| {
+            let (display, value) = potential_facts(&outputs(total), incomplete, format);
+            StudyReturn {
+                value,
+                display,
+                incomplete,
+                ..StudyReturn::default()
+            }
+        };
+        let studies = vec![
+            sm(1, "NESN", "2026-01-10T00:00:00Z", "active"),
+            sm(2, "ROG", "2026-03-02T00:00:00Z", "active"),
+            sm(3, "ABBN", "2026-02-15T00:00:00Z", "active"),
+            sm(4, "UBSG", "2026-04-01T00:00:00Z", "active"),
+        ];
+        let mut returns = HashMap::new();
+        returns.insert(Uuid::from_u128(1), fact("12", false));
+        returns.insert(Uuid::from_u128(2), fact("99", true)); // the highest total, but withheld
+        returns.insert(Uuid::from_u128(3), fact("5", false));
+        returns.insert(Uuid::from_u128(4), fact("1", true)); // withheld too
+        let sorted = |descending| {
+            curate(
+                &studies,
+                "",
+                SortKey::PotentialReturn,
+                descending,
+                StatusFilter::All,
+                &returns,
+            )
+        };
+        let desc = sorted(true);
+        assert_eq!(tickers(&desc), vec!["NESN", "ABBN", "UBSG", "ROG"]);
+        assert_eq!(desc[2].potential_return.to_string(), "—");
+        assert_eq!(desc[3].potential_return.to_string(), "—");
+        assert!(desc[3].incomplete, "the « à compléter » marker still rides");
+        assert_eq!(
+            tickers(&sorted(false)),
+            vec!["ABBN", "NESN", "ROG", "UBSG"],
+            "ascending: the withheld pair STILL last (id order)"
+        );
+    }
+
+    #[test]
+    fn sort_by_ud_compares_exact_decimals_and_sinks_the_dash() {
+        // Exact decimals, not strings: « 10,5:1 » > « 9,8:1 » > « 3,05:1 » > « 3,04:1 » (a string sort
+        // would put « 10,5 » before « 3,… » ascending). ABBN's ratio is withheld/unknown (« — »)
+        // and a study absent from the map is unknown — both sink LAST in both directions.
+        let studies = vec![
+            sm(1, "NESN", "2026-01-10T00:00:00Z", "active"),
+            sm(2, "ROG", "2026-03-02T00:00:00Z", "active"),
+            sm(3, "ABBN", "2026-02-15T00:00:00Z", "active"),
+            sm(4, "UBSG", "2026-04-01T00:00:00Z", "active"),
+            sm(5, "ZURN", "2026-05-01T00:00:00Z", "active"),
+            sm(6, "SREN", "2026-06-01T00:00:00Z", "active"),
+        ];
+        let mut returns = HashMap::new();
+        returns.insert(Uuid::from_u128(1), ud(Some("9.8"), "9,8:1"));
+        returns.insert(Uuid::from_u128(2), ud(Some("10.5"), "10,5:1"));
+        returns.insert(Uuid::from_u128(3), ud(None, "—"));
+        returns.insert(Uuid::from_u128(4), ud(Some("3.05"), "3,05:1"));
+        returns.insert(Uuid::from_u128(5), ud(Some("3.04"), "3,04:1"));
+        // id 6 (SREN) deliberately absent → unknown ratio.
+
+        let desc = curate(
+            &studies,
+            "",
+            SortKey::UpsideDownside,
+            true,
+            StatusFilter::All,
+            &returns,
+        );
+        assert_eq!(
+            tickers(&desc),
+            vec!["ROG", "NESN", "UBSG", "ZURN", "SREN", "ABBN"],
+            "descending: highest first; the dashes last, their `id` tiebreak flipped like the rest"
+        );
+        assert_eq!(desc[0].ud_ratio.to_string(), "10,5:1");
+        assert_eq!(desc[4].ud_ratio.to_string(), "—");
+        assert_eq!(desc[5].ud_ratio.to_string(), "—");
+
+        let asc = curate(
+            &studies,
+            "",
+            SortKey::UpsideDownside,
+            false,
+            StatusFilter::All,
+            &returns,
+        );
+        assert_eq!(
+            tickers(&asc),
+            vec!["ZURN", "UBSG", "NESN", "ROG", "ABBN", "SREN"],
+            "ascending: lowest known first, the dashes STILL last"
+        );
+    }
+
+    #[test]
+    fn sort_by_ud_ties_break_on_id_like_the_other_sorts() {
+        // Equal ratios (« 2:1 » == « 2,0:1 » as decimals) and two dashes: `id` decides, flipped with
+        // the direction for the known ratios; the dashes stay last, in `id` order flipped likewise.
+        let studies = vec![
+            sm(4, "DDD", "2026-01-01T00:00:00Z", "active"),
+            sm(3, "CCC", "2026-01-01T00:00:00Z", "active"),
+            sm(2, "BBB", "2026-01-01T00:00:00Z", "active"),
+            sm(1, "AAA", "2026-01-01T00:00:00Z", "active"),
+        ];
+        let mut returns = HashMap::new();
+        returns.insert(Uuid::from_u128(1), ud(Some("2"), "2:1"));
+        returns.insert(Uuid::from_u128(2), ud(Some("2.0"), "2,0:1"));
+        returns.insert(Uuid::from_u128(3), ud(None, "—"));
+        returns.insert(Uuid::from_u128(4), ud(None, "—"));
+        let asc = curate(
+            &studies,
+            "",
+            SortKey::UpsideDownside,
+            false,
+            StatusFilter::All,
+            &returns,
+        );
+        assert_eq!(tickers(&asc), vec!["AAA", "BBB", "CCC", "DDD"]);
+        let desc = curate(
+            &studies,
+            "",
+            SortKey::UpsideDownside,
+            true,
+            StatusFilter::All,
+            &returns,
+        );
+        assert_eq!(tickers(&desc), vec!["BBB", "AAA", "DDD", "CCC"]);
+    }
+
     #[test]
     fn incomplete_flag_rides_onto_the_row() {
         // Issue #148: the per-study `incomplete` fact threads through curation onto the row (and a
@@ -423,7 +811,8 @@ mod tests {
             StudyReturn {
                 value: None,
                 display: "—".to_string(),
-                ud: "3,4:1".to_string(),
+                ud: "—".to_string(),
+                ud_value: None,
                 incomplete: true,
                 zone: "",
                 company_name: String::new(),
@@ -441,7 +830,7 @@ mod tests {
         assert_eq!(tickers(&rows), vec!["NESN", "ROG"]);
         assert!(rows[0].incomplete, "NESN is flagged à compléter");
         // The U/D ratio rides onto the row too; an absent study reads « — », never blank.
-        assert_eq!(rows[0].ud_ratio.to_string(), "3,4:1");
+        assert_eq!(rows[0].ud_ratio.to_string(), "—");
         assert_eq!(rows[1].ud_ratio.to_string(), "—");
         assert!(
             !rows[1].incomplete,
@@ -455,5 +844,7 @@ mod tests {
         assert_eq!(StatusFilter::from_wire("all"), StatusFilter::All);
         assert_eq!(SortKey::from_wire("nonsense"), SortKey::Date);
         assert_eq!(SortKey::from_wire("ticker"), SortKey::Ticker);
+        assert_eq!(SortKey::from_wire("potential"), SortKey::PotentialReturn);
+        assert_eq!(SortKey::from_wire("ud"), SortKey::UpsideDownside);
     }
 }

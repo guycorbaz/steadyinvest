@@ -813,8 +813,10 @@ mod tests {
         // main (no @tr change there): 1182, measured.
         // PR #290 brought up to date with main (PR #289, #291, #293): FR63's −6 and the age
         // horizon's +4 on main's real 1178: 1178 − 6 + 4 = 1176, measured.
+        // « Tri : U/D » (Guy, 2026-10-01; PR #292): the dashboard's fifth sort chip: 1176 + 1 =
+        // 1177, measured after PR #292 was brought up to date with main (PR #289, #290, #291, #293).
         assert!(
-            total >= 1176,
+            total >= 1177,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }

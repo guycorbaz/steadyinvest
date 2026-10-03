@@ -1716,6 +1716,46 @@ mod tests {
         )));
     }
 
+    /// PR #292 × PR #293: the dashboard's « — » rule keys on `study_incomplete` (a MISSING gate).
+    /// A price of unknown date (no recorded origin) or past the age horizon is gate `Stale` — the
+    /// verdict provisional, the study NOT incomplete — so its U/D ratio and potential stay listed.
+    /// Only an absent price withholds and counts as incomplete.
+    #[test]
+    fn a_stale_or_undated_price_is_provisional_not_incomplete() {
+        let years: Vec<YearData> = (2021..=2025).map(|y| year(y, validated_cell)).collect();
+        let mut undated = full_judgment();
+        undated.current_price_origin = None;
+        let mut aged = full_judgment();
+        if let Some(o) = aged.current_price_origin.as_mut() {
+            o.aged = true;
+        }
+        for judgment in [undated, aged] {
+            let snap = build_snapshot(&study_with(years.clone(), judgment)).unwrap();
+            assert!(
+                matches!(snap.verdict(), Verdict::Provisional(_)),
+                "a stale/undated price is provisional, got {:?}",
+                snap.verdict()
+            );
+            assert!(!study_incomplete(&snap), "a stale price is nothing to fill");
+            assert!(
+                matches!(
+                    snap.outputs().risk_reward.upside_downside,
+                    UpsideDownside::Ratio(_)
+                ),
+                "the U/D ratio is still computed for a provisional study"
+            );
+        }
+        let absent = Judgment {
+            current_price: None,
+            ..full_judgment()
+        };
+        let snap = build_snapshot(&study_with(years, absent)).unwrap();
+        assert!(
+            study_incomplete(&snap),
+            "an absent price is an input to fill"
+        );
+    }
+
     /// Issue #114: `required_judgment_fields` maps the verdict's OPEN judgment gates to their
     /// `JudgmentField` keys, so the form highlights exactly the inputs to fill. A missing
     /// `current_price` surfaces as the `"current_price"` field-key; a field that IS filled never
