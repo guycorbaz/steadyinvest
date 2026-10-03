@@ -6,7 +6,8 @@
 //! PDF cannot drift from the on-screen form. Discipline carried from the UI:
 //!
 //! - **Neutral labels only** (no NAIC marks/logos or verbatim instructional text — open-source
-//!   constraint); the zone nouns mirror the app's neutral set ("Zone basse/médiane/haute").
+//!   constraint), except the zone nouns: they are the active label set's, as on the study screen
+//!   ([`StudyPdfExtras::zones`] — owner decision, Guy 2026-10-01, FR63).
 //! - **All sections expanded** (a PDF has no collapsibles).
 //! - **Black-and-white first** (NFR-U3): nothing reads by colour ALONE — text + position + line
 //!   weight + the « * » of a judged value carry every fact. Owner decision (Guy, 2026-09-26): the
@@ -23,6 +24,8 @@ use steadyinvest_core::method::{FORECAST_HORIZON_YEARS, USABLE_YEARS_FLOOR};
 use steadyinvest_core::normalize::{CanonicalYear, NormalizeError};
 use steadyinvest_core::rounding::{DisplayField, round_for_display};
 use steadyinvest_core::ssg::{Trend, UpsideDownside, Zone, ZoneBounds};
+
+use crate::zones::{ZoneNouns, lower};
 
 use pdf_writer::{Content, Name, Pdf, Rect, Ref, Str};
 
@@ -230,9 +233,14 @@ pub fn render_study_pdf(study: &Study, numbers: NumberStyle) -> Result<Vec<u8>, 
 /// app's words (« PER haut jugé au-dessus de 25 · … », « aucun », « — » when not assessable), or
 /// `None` when the study did not compute (the line is then left out); and the zone the price
 /// origin's date is shown in (owner decision D, Guy 2026-10-03 — the app's clock zone, local).
+///
+/// FR63 (owner decision, Guy 2026-10-01): `zones` are the active label set's nouns — the study is
+/// part of the NAIC methodology, so its PDF says the screen's words (the default is the neutral
+/// set, byte-identical to the render without the app).
 #[derive(Debug, Clone, Copy)]
 pub struct StudyPdfExtras<'a> {
     pub quality_flags: Option<&'a str>,
+    pub zones: ZoneNouns,
     /// The zone « récupéré le … » / « saisi le … » is read in — the SAME zone the price age was
     /// counted in ([`crate::price_age::price_date_shown`]), so the shown day never contradicts the
     /// age. The default (UTC) keeps a render deterministic whatever the machine's zone.
@@ -243,6 +251,7 @@ impl Default for StudyPdfExtras<'_> {
     fn default() -> Self {
         StudyPdfExtras {
             quality_flags: None,
+            zones: ZoneNouns::default(),
             day_zone: crate::price_age::DayZone::UTC,
         }
     }
@@ -259,6 +268,7 @@ pub fn render_study_pdf_with(
     let outputs = frame.snapshot.outputs();
     let judgment = &study.judgment;
     let current_price = judgment.current_price.map(|m| m.as_decimal());
+    let zones = extras.zones;
 
     let mut doc = Doc::new();
 
@@ -527,13 +537,13 @@ pub fn render_study_pdf_with(
                 ));
                 b.indent_line(&format!(
                     "{} : {} à {}   ·   {} : {} à {}   ·   {} : {} à {}",
-                    ZONE_LOW,
+                    zones.low,
                     nf.money(Some(z.forecast_low)),
                     nf.money(Some(z.buy_top)),
-                    ZONE_MID,
+                    zones.middle,
                     nf.money(Some(z.buy_top)),
                     nf.money(Some(z.neutral_top)),
-                    ZONE_HIGH,
+                    zones.high,
                     nf.money(Some(z.neutral_top)),
                     nf.money(Some(z.forecast_high)),
                 ));
@@ -543,7 +553,7 @@ pub fn render_study_pdf_with(
                     Some(_) => b.indent_line(&format!(
                         "Le cours actuel {} se situe : {}",
                         nf.money(current_price),
-                        price_position(price_place(z, current_price)),
+                        price_position(price_place(z, current_price), zones),
                     )),
                     None => b.indent_line(PRICE_ABSENT),
                 }
@@ -582,7 +592,7 @@ pub fn render_study_pdf_with(
         doc.block(&b);
         doc.gap(4.0);
         // Issue #105 — the zone bar (low/median/high thirds + the current-price marker).
-        doc.zone_bar(r.zones.as_ref(), current_price, nf);
+        doc.zone_bar(r.zones.as_ref(), current_price, nf, zones);
     }
     doc.gap(6.0);
 
@@ -648,7 +658,7 @@ pub fn render_study_pdf_with(
 
     // Story 8.8 (spec §7): the frozen verdict, and the current one beside it when they differ.
     if let Some(frozen) = &study.frozen_verdict {
-        frozen_block(&mut doc, study, &frame, frozen, nf);
+        frozen_block(&mut doc, study, &frame, frozen, nf, zones);
     }
 
     // ── Annexe — every historical figure (the form plots them; the table keeps the exact values) ──
@@ -1252,15 +1262,18 @@ fn price_place(z: &ZoneBounds, price: Option<Decimal>) -> PricePlace {
     }
 }
 
-fn price_position(place: PricePlace) -> &'static str {
-    match place {
-        PricePlace::In(Zone::Buy) => "dans la zone basse",
-        PricePlace::In(Zone::Neutral) => "dans la zone médiane",
-        PricePlace::In(Zone::Sell) => "dans la zone haute",
-        PricePlace::Below => BELOW_RANGE,
-        PricePlace::Above => ABOVE_RANGE,
-        PricePlace::Absent => EM_DASH,
-    }
+/// The price's place in words; a zone is named by the active label set's noun, lowered
+/// (« dans la zone basse » / « dans la zone d'achat » — FR63).
+fn price_position(place: PricePlace, zones: ZoneNouns) -> String {
+    let zone = match place {
+        PricePlace::In(Zone::Buy) => zones.low,
+        PricePlace::In(Zone::Neutral) => zones.middle,
+        PricePlace::In(Zone::Sell) => zones.high,
+        PricePlace::Below => return BELOW_RANGE.to_string(),
+        PricePlace::Above => return ABOVE_RANGE.to_string(),
+        PricePlace::Absent => return EM_DASH.to_string(),
+    };
+    IN_ZONE.replace("{}", &lower(zone))
 }
 
 fn upside(u: &UpsideDownside, nf: NumberStyle) -> String {
@@ -1289,6 +1302,7 @@ fn frozen_block(
     frame: &crate::form::StudyFrame,
     frozen: &steadyinvest_contract::FrozenVerdict,
     nf: NumberStyle,
+    zones: ZoneNouns,
 ) {
     use steadyinvest_contract::{FrozenCriterion, FrozenUpsideDownside, FrozenVerdict, FrozenZone};
     let current = crate::form::verdict_record(
@@ -1312,9 +1326,9 @@ fn frozen_block(
     };
     let zone = |v: &FrozenVerdict| {
         match v.present_zone {
-            Some(FrozenZone::Low) => ZONE_LOW,
-            Some(FrozenZone::Middle) => ZONE_MID,
-            Some(FrozenZone::High) => ZONE_HIGH,
+            Some(FrozenZone::Low) => zones.low,
+            Some(FrozenZone::Middle) => zones.middle,
+            Some(FrozenZone::High) => zones.high,
             None => EM_DASH,
         }
         .to_string()
@@ -1601,9 +1615,8 @@ const QUARTER_BOX_TITLE: &str = "Chiffres trimestriels récents";
 const QUARTER_LATEST: &str = "Dernier trimestre";
 const QUARTER_YEAR_AGO: &str = "Même trimestre, un an avant";
 const QUARTER_CHANGE: &str = "Variation";
-const ZONE_LOW: &str = "Zone basse";
-const ZONE_MID: &str = "Zone médiane";
-const ZONE_HIGH: &str = "Zone haute";
+// The zone nouns are the active label set's (`ZoneNouns`, FR63); the sentence around them here.
+const IN_ZONE: &str = "dans la {}";
 const CURRENT_PRICE: &str = "Cours actuel";
 // G1 final (M1 / L9): the current price's place when it is not inside a zone — named, never
 // « hors de la plage » for an absent price, never a marker pinned at the edge as if on it.
@@ -1785,9 +1798,7 @@ const REPORT_USER_FACING: &[&str] = &[
     QUARTER_LATEST,
     QUARTER_YEAR_AGO,
     QUARTER_CHANGE,
-    ZONE_LOW,
-    ZONE_MID,
-    ZONE_HIGH,
+    IN_ZONE,
     CURRENT_PRICE,
     PRICE_ABSENT,
     BELOW_RANGE,
@@ -2814,6 +2825,7 @@ impl Doc {
         zones: Option<&ZoneBounds>,
         current_price: Option<Decimal>,
         nf: NumberStyle,
+        nouns: ZoneNouns,
     ) {
         let Some(z) = zones else {
             return;
@@ -2847,15 +2859,15 @@ impl Doc {
 
         // Zone labels centered in each third.
         let mid_y = top + ZONEBAR_H / 2.0 + 3.0;
-        text_centered(&mut self.cur, (x0 + fx(buy)) / 2.0, mid_y, 8.0, ZONE_LOW);
+        text_centered(&mut self.cur, (x0 + fx(buy)) / 2.0, mid_y, 8.0, nouns.low);
         text_centered(
             &mut self.cur,
             (fx(buy) + fx(neu)) / 2.0,
             mid_y,
             8.0,
-            ZONE_MID,
+            nouns.middle,
         );
-        text_centered(&mut self.cur, (fx(neu) + x1) / 2.0, mid_y, 8.0, ZONE_HIGH);
+        text_centered(&mut self.cur, (fx(neu) + x1) / 2.0, mid_y, 8.0, nouns.high);
 
         // Boundary prices under the bar.
         let by = top + ZONEBAR_H + 9.0;
@@ -4014,7 +4026,9 @@ mod tests {
             PricePlace::Above,
             PricePlace::Absent,
         ] {
-            assert_neutral(price_position(p));
+            for zones in [ZoneNouns::NEUTRAL, ZoneNouns::NAIC] {
+                assert_neutral(&price_position(p, zones));
+            }
         }
         for t in [Some(Trend::Up), Some(Trend::Even), Some(Trend::Down), None] {
             assert_neutral(trend(t));
@@ -4398,6 +4412,66 @@ mod tests {
         study.frozen_verdict = Some(frozen);
         let edited = render_study_pdf(&study, NumberStyle::Comma).unwrap();
         assert!(contains(&edited, "• Entrées : 1 modifiée(s)"));
+    }
+
+    // FR63 (owner decision, Guy 2026-10-01): the study is part of the NAIC methodology, so its
+    // PDF says the active label set's zone nouns — the §4 zoning line, the price's place, the zone
+    // bar and the frozen verdict's zone row — never the other set's, never a mix.
+    #[test]
+    fn the_zone_nouns_follow_the_active_label_set() {
+        let mut study = demo_study();
+        let frame = crate::form::build_frame(&study).unwrap();
+        study.frozen_verdict = Some(crate::form::verdict_record(
+            &study,
+            &frame,
+            &steadyinvest_contract::Timestamp("2026-09-30T10:00:00Z".to_string()),
+        ));
+        let zone = frame.snapshot.outputs().risk_reward.present_price_zone;
+        assert!(zone.is_some(), "the demo's price sits in a zone");
+        for (zones, other) in [
+            (ZoneNouns::NAIC, ZoneNouns::NEUTRAL),
+            (ZoneNouns::NEUTRAL, ZoneNouns::NAIC),
+        ] {
+            let extras = StudyPdfExtras {
+                zones,
+                ..StudyPdfExtras::default()
+            };
+            let bytes = render_study_pdf_with(&study, NumberStyle::Comma, &extras).unwrap();
+            for noun in [zones.low, zones.middle, zones.high] {
+                // The zoning line and the bar both name every zone.
+                assert!(occurrences(&bytes, noun) >= 2, "{noun}");
+            }
+            let place = price_position(PricePlace::In(zone.unwrap()), zones);
+            assert!(contains(&bytes, &place), "{place}");
+            assert!(contains(
+                &bytes,
+                &format!(
+                    "Zone du prix : {}",
+                    match zone.unwrap() {
+                        Zone::Buy => zones.low,
+                        Zone::Neutral => zones.middle,
+                        Zone::Sell => zones.high,
+                    }
+                )
+            ));
+            for noun in [other.low, other.middle, other.high] {
+                assert!(!contains(&bytes, noun), "{noun} leaks into the other set");
+                assert!(!contains(&bytes, &noun.to_lowercase()), "{noun} (lowered)");
+            }
+        }
+        // Without the app the PDF speaks the neutral set, byte for byte.
+        assert_eq!(
+            render_study_pdf(&study, NumberStyle::Comma).unwrap(),
+            render_study_pdf_with(
+                &study,
+                NumberStyle::Comma,
+                &StudyPdfExtras {
+                    zones: ZoneNouns::NEUTRAL,
+                    ..StudyPdfExtras::default()
+                }
+            )
+            .unwrap()
+        );
     }
 
     // FR7 (2026-10-01): the app's quality-flags line is printed in the Synthèse; without it the

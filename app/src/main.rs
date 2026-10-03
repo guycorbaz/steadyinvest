@@ -202,6 +202,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let cfg = config.borrow();
         theme::apply(&ui, cfg.theme);
         labels::apply(&ui, cfg.label_set);
+        labels::apply_neutral_zones(&ui);
         let prefs = ui.global::<Prefs>();
         prefs.set_dark_theme(cfg.theme == Theme::Dark);
         prefs.set_label_set(cfg.label_set.as_str().into());

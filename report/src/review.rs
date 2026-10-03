@@ -3,8 +3,13 @@
 //! module owns EVERY label (its own neutral inventory, tested like `pdf.rs`'s) and lays them out:
 //! page 1 = the header + the four répartition blocks + the concentration; page 2+ = the positions
 //! table (header repeated across breaks), the studies due for review, the counts.
+//!
+//! FR63 (owner decision, Guy 2026-10-01): the review is part of the NAIC methodology (the PERT-like
+//! portfolio review), so its zone nouns are the active label set's ([`PortfolioReview::zones`]),
+//! as on the « Revue » screen — every other label stays this module's own.
 
 use crate::pdf::{Doc, EM_DASH, MARGIN, PAGE_W};
+use crate::zones::{ZoneNouns, lower};
 
 /// One line of a share block: a label (data — a sector, a currency, a bank, a ticker, or a size
 /// key `small` | `medium` | `large`; which one is known from the FIELD the line sits in, never
@@ -141,6 +146,9 @@ pub struct PortfolioReview {
     /// `(count-key, value)` — keys: positions · linked · full · provisional · withheld ·
     /// not_computable · flagged · high_zone · stop_breached · due.
     pub counts: Vec<(String, String)>,
+    /// The active label set's zone nouns (FR63) — the positions' zone column, the « other study in
+    /// the high zone » note, the high-zone trigger and its count.
+    pub zones: ZoneNouns,
 }
 
 // ── the neutral inventory (FR13) — every static string this layout emits ──
@@ -216,11 +224,9 @@ const MIXED_CURRENCIES: &str = "études en";
 const MIXED_NO_STUDY: &str = "un lot sans étude";
 const MIXED_UNREADABLE: &str = "l'étude d'un lot n'a pas pu être lue";
 const OTHER_FLAGGED: &str = "autre étude de ce titre avec des signaux :";
-const OTHER_HIGH_ZONE: &str = "autre étude de ce titre dans la zone haute ou au-dessus :";
+// `{}` is the active label set's high-zone noun, lowered (FR63) — as on the « Revue » screen.
+const OTHER_HIGH_ZONE: &str = "autre étude de ce titre dans la {} ou au-dessus :";
 const LOW_CONFIDENCE: &str = "confiance réduite";
-const ZONE_BUY: &str = "basse";
-const ZONE_NEUTRAL: &str = "médiane";
-const ZONE_SELL: &str = "haute";
 const ZONE_BELOW: &str = "sous la bande";
 const ZONE_ABOVE: &str = "au-dessus de la bande";
 // The data state, worded exactly as the screen's caption (parity — « Données : — » said less).
@@ -234,7 +240,7 @@ const STOP_NO_CURRENCY: &str =
     "non comparé au prix : le lot n'a pas de devise renseignée et l'étude est en";
 const STOP_UNREADABLE: &str = "non comparé au prix : l'étude du lot n'a pas pu être lue";
 const TRIGGER_STOP: &str = "Le prix a atteint le seuil suiveur.";
-const TRIGGER_SELL: &str = "Le prix est dans la zone haute.";
+const TRIGGER_SELL: &str = "Le prix est dans la {}.";
 const D_TICKER: &str = "Titre";
 const D_DATE: &str = "Dernière sauvegarde";
 const D_REASON: &str = "Motif";
@@ -258,7 +264,7 @@ const K_PROVISIONAL: &str =
 const K_WITHHELD: &str = "dont l'étude attend une donnée requise";
 const K_NOT_COMPUTABLE: &str = "dont l'étude n'est pas calculable";
 const K_FLAGGED: &str = "avec au moins un signal";
-const K_HIGH_ZONE: &str = "dans la zone haute ou au-dessus";
+const K_HIGH_ZONE: &str = "dans la {} ou au-dessus";
 const K_STOP_BREACHED: &str = "sous leur seuil suiveur";
 const K_DUE: &str = "études à revoir";
 const EMPTY_BLOCK: &str = "Aucune donnée.";
@@ -338,9 +344,6 @@ const REVIEW_USER_FACING: &[&str] = &[
     OTHER_FLAGGED,
     OTHER_HIGH_ZONE,
     LOW_CONFIDENCE,
-    ZONE_BUY,
-    ZONE_NEUTRAL,
-    ZONE_SELL,
     ZONE_BELOW,
     ZONE_ABOVE,
     DATA_STALE,
@@ -559,15 +562,24 @@ fn study_label(l: &ReviewLine) -> &'static str {
     }
 }
 
-fn zone_label(key: &str) -> &str {
+/// The zone column: the active label set's noun in the screen's own form, capitalised
+/// (« Zone basse » / « Zone d'achat » — FR63, as `review.slint`'s `zone-words`), or the place
+/// outside the band (lower case, as on the screen).
+fn zone_label(key: &str, zones: ZoneNouns) -> String {
+    if let Some(noun) = zones.of_key(key) {
+        return noun.to_string();
+    }
     match key {
-        "buy" => ZONE_BUY,
-        "neutral" => ZONE_NEUTRAL,
-        "sell" => ZONE_SELL,
         "below" => ZONE_BELOW,
         "above" => ZONE_ABOVE,
         _ => EM_DASH,
     }
+    .to_string()
+}
+
+/// A template's `{}` filled with the high-zone noun, lowered.
+fn with_high_zone(template: &str, zones: ZoneNouns) -> String {
+    template.replace("{}", &lower(zones.high))
 }
 
 /// The data state as the screen words it — and, as on the screen, only for a study the engine
@@ -709,7 +721,7 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
                 },
                 pct_or_dash(&l.share),
                 study_label(l).to_string(),
-                zone_label(&l.zone).to_string(),
+                zone_label(&l.zone, review.zones),
                 or_dash(&l.ud),
                 or_dash(&l.relative),
             ];
@@ -750,7 +762,11 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
                 extra.push(format!("{OTHER_FLAGGED} {}", l.other_flagged));
             }
             if !l.other_high_zone.is_empty() {
-                extra.push(format!("{OTHER_HIGH_ZONE} {}", l.other_high_zone));
+                extra.push(format!(
+                    "{} {}",
+                    with_high_zone(OTHER_HIGH_ZONE, review.zones),
+                    l.other_high_zone
+                ));
             }
             if !l.price.is_empty() {
                 extra.push(format!("{PRICE_LABEL} {}", l.price));
@@ -791,7 +807,7 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
             }
             match l.trigger.as_str() {
                 "stop" => extra.push(TRIGGER_STOP.to_string()),
-                "sell" => extra.push(TRIGGER_SELL.to_string()),
+                "sell" => extra.push(with_high_zone(TRIGGER_SELL, review.zones)),
                 _ => {}
             }
             doc.grid_row_num_with_note(
@@ -840,6 +856,7 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
     doc.gap(6.0);
 
     doc.section(S_COUNTS);
+    let high_zone = with_high_zone(K_HIGH_ZONE, review.zones);
     for (key, value) in &review.counts {
         let label = match key.as_str() {
             "positions" => K_POSITIONS,
@@ -849,7 +866,7 @@ pub fn render_portfolio_review(review: &PortfolioReview) -> Vec<u8> {
             "withheld" => K_WITHHELD,
             "not_computable" => K_NOT_COMPUTABLE,
             "flagged" => K_FLAGGED,
-            "high_zone" => K_HIGH_ZONE,
+            "high_zone" => high_zone.as_str(),
             "stop_breached" => K_STOP_BREACHED,
             "due" => K_DUE,
             other => other,
@@ -1153,6 +1170,53 @@ mod tests {
     }
 
     #[test]
+    fn the_zone_nouns_follow_the_active_label_set() {
+        // FR63 (owner decision, Guy 2026-10-01): the review is part of the NAIC methodology —
+        // its zone column, the other study's high-zone note, the high-zone trigger and its count
+        // say the active set's nouns, never the other set's.
+        for (zones, other) in [
+            (ZoneNouns::NAIC, ZoneNouns::NEUTRAL),
+            (ZoneNouns::NEUTRAL, ZoneNouns::NAIC),
+        ] {
+            let mut r = sample();
+            r.zones = zones;
+            r.positions[0].zone = "buy".into();
+            r.positions[0].other_high_zone = "CHF".into();
+            r.positions[0].trigger = "sell".into();
+            r.counts = vec![("high_zone".into(), "1".into())];
+            // The column says the noun as the screen does: capitalised (« Zone d'achat »).
+            assert_eq!(zone_label("buy", zones), zones.low);
+            assert_eq!(zone_label("neutral", zones), zones.middle);
+            assert_eq!(zone_label("sell", zones), zones.high);
+            assert_eq!(zone_label("below", zones), ZONE_BELOW);
+            assert_eq!(zone_label("", zones), EM_DASH);
+            let high = zones.high.to_lowercase();
+            let bytes = render_portfolio_review(&r);
+            // WinAnsi, as printed (« médiane » is one byte per letter there).
+            let shows = |s: &str| {
+                let raw = crate::pdf::winansi_for_tests(s);
+                let hex: Vec<u8> = raw
+                    .iter()
+                    .flat_map(|b| format!("{b:02X}").into_bytes())
+                    .collect();
+                bytes.windows(raw.len()).any(|w| w == raw.as_slice())
+                    || bytes.windows(hex.len()).any(|w| w == hex.as_slice())
+            };
+            assert!(shows(zones.low), "zone column");
+            assert!(shows(&format!("dans la {high} ou au-dessus :")));
+            assert!(shows(&format!("Le prix est dans la {high}.")));
+            assert!(shows(&format!("1   dans la {high} ou au-dessus")));
+            for noun in [other.low, other.middle, other.high] {
+                assert!(
+                    !shows(noun) && !shows(&noun.to_lowercase()),
+                    "{noun} leaks into the other set"
+                );
+            }
+        }
+        assert_eq!(PortfolioReview::default().zones, ZoneNouns::NEUTRAL);
+    }
+
+    #[test]
     fn mixed_links_state_every_fact_and_the_other_studies_signals() {
         let mut r = sample();
         let p = &mut r.positions[0];
@@ -1217,15 +1281,14 @@ mod tests {
                 "« {word} » needs {need} pt, column {col} has {room}"
             );
         };
-        for zone in [
-            ZONE_BUY,
-            ZONE_NEUTRAL,
-            ZONE_SELL,
-            ZONE_BELOW,
-            ZONE_ABOVE,
-            P_ZONE,
-        ] {
+        for zone in [ZONE_BELOW, ZONE_ABOVE, P_ZONE] {
             fits(5, zone);
+        }
+        // Both label sets' nouns, as the column prints them (FR63) — « zone de maintien » too.
+        for set in [ZoneNouns::NEUTRAL, ZoneNouns::NAIC] {
+            for key in ["buy", "neutral", "sell"] {
+                fits(5, &zone_label(key, set));
+            }
         }
         for study in [
             STUDY_FULL,

@@ -5,8 +5,17 @@
 //! Seed (Story 2.1, dev discretion — recorded in the Dev Agent Record): the method term itself
 //! plus the three judgment-zone nouns, the only method vocabulary that exists in the UI today.
 //! Later stories extend the table; every key MUST be defined in both sets (tested below).
+//!
+//! Where the set applies (owner decision, Guy 2026-10-01 — it replaces the 2026-09-26 one that
+//! kept the comparison and the PDFs neutral): every screen of the NAIC methodology and its PDF —
+//! the study (SSG) and its PDF, the comparison (Stock Comparison Guide) and its PDF, the portfolio
+//! review and its PDF. The screens outside the methodology stay neutral: the quick screen, the
+//! criblage, the holdings (« Portefeuilles »), the watchlist, the AI proposals — and the MCP
+//! server's codes (low / middle / high). The zone nouns live in the report crate
+//! ([`ZoneNouns`]), the one source the PDFs and this table share.
 
 use serde::{Deserialize, Serialize};
+use steadyinvest_report::ZoneNouns;
 
 /// Which label set is active. NAIC terms are kept as in-app labels (personal use); the neutral
 /// set is the swappable replacement.
@@ -54,20 +63,29 @@ pub const LABELS: [LabelEntry; 4] = [
     },
     LabelEntry {
         key: "zone-buy",
-        naic: "Zone d'achat",
-        neutral: "Zone basse",
+        naic: ZoneNouns::NAIC.low,
+        neutral: ZoneNouns::NEUTRAL.low,
     },
     LabelEntry {
         key: "zone-hold",
-        naic: "Zone de maintien",
-        neutral: "Zone médiane",
+        naic: ZoneNouns::NAIC.middle,
+        neutral: ZoneNouns::NEUTRAL.middle,
     },
     LabelEntry {
         key: "zone-sell",
-        naic: "Zone de vente",
-        neutral: "Zone haute",
+        naic: ZoneNouns::NAIC.high,
+        neutral: ZoneNouns::NEUTRAL.high,
     },
 ];
+
+/// The zone nouns of `set`, as the NAIC-methodology PDFs print them (FR63, 2026-10-01): the
+/// study, comparison and review exports pass the set in force at export time.
+pub fn zone_nouns(set: LabelSet) -> ZoneNouns {
+    match set {
+        LabelSet::Naic => ZoneNouns::NAIC,
+        LabelSet::Neutral => ZoneNouns::NEUTRAL,
+    }
+}
 
 /// Resolve one key in the given set. `None` for an unknown key — callers in `app` use the
 /// statically-known keys below, so a `None` is a programming error surfaced by the tests.
@@ -90,6 +108,26 @@ pub fn apply(ui: &crate::MainWindow, set: LabelSet) {
     labels.set_zone_buy(resolve("zone-buy"));
     labels.set_zone_hold(resolve("zone-hold"));
     labels.set_zone_sell(resolve("zone-sell"));
+}
+
+/// Push the NEUTRAL zone nouns into the `NeutralZones` Slint global, once, before the window shows.
+/// FR63 (owner decision, Guy 2026-10-01): the screens outside the NAIC methodology — the holdings
+/// and the watchlist — word the zones in the neutral set whatever the active one. The nouns are the
+/// neutral set's ([`ZoneNouns::NEUTRAL`]), the one source this table also reads — never a second
+/// copy. A label-set swap never touches them.
+pub fn apply_neutral_zones(ui: &crate::MainWindow) {
+    use slint::ComponentHandle;
+    let zones = ui.global::<crate::NeutralZones>();
+    let nouns = neutral_zone_nouns();
+    zones.set_zone_buy(nouns.low.into());
+    zones.set_zone_hold(nouns.middle.into());
+    zones.set_zone_sell(nouns.high.into());
+}
+
+/// The zone nouns of the screens outside the NAIC methodology: the neutral set, whatever the
+/// active one (FR63, 2026-10-01).
+pub fn neutral_zone_nouns() -> ZoneNouns {
+    zone_nouns(LabelSet::Neutral)
 }
 
 #[cfg(test)]
@@ -132,6 +170,41 @@ mod tests {
             Some("Étude d'action")
         );
         assert_eq!(label(LabelSet::Naic, "no-such-key"), None);
+    }
+
+    #[test]
+    fn the_pdfs_zone_nouns_are_the_screens() {
+        // One vocabulary: the PDF of a NAIC-methodology screen says the screen's nouns.
+        for set in [LabelSet::Naic, LabelSet::Neutral] {
+            let nouns = zone_nouns(set);
+            assert_eq!(label(set, "zone-buy"), Some(nouns.low));
+            assert_eq!(label(set, "zone-hold"), Some(nouns.middle));
+            assert_eq!(label(set, "zone-sell"), Some(nouns.high));
+        }
+        assert_eq!(label(LabelSet::Naic, "zone-buy"), Some("Zone d'achat"));
+        assert_eq!(label(LabelSet::Neutral, "zone-buy"), Some("Zone basse"));
+    }
+
+    #[test]
+    fn the_neutral_screens_nouns_are_the_neutral_sets_whatever_the_active_one() {
+        // FR63 (2026-10-01): holdings and watchlist never follow the active set.
+        assert_eq!(neutral_zone_nouns(), ZoneNouns::NEUTRAL);
+        assert_eq!(
+            neutral_zone_nouns().low,
+            label(LabelSet::Neutral, "zone-buy").unwrap()
+        );
+        assert_eq!(
+            neutral_zone_nouns().middle,
+            label(LabelSet::Neutral, "zone-hold").unwrap()
+        );
+        assert_eq!(
+            neutral_zone_nouns().high,
+            label(LabelSet::Neutral, "zone-sell").unwrap()
+        );
+        assert_ne!(
+            neutral_zone_nouns().low,
+            label(LabelSet::Naic, "zone-buy").unwrap()
+        );
     }
 
     #[test]

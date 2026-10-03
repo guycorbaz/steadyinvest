@@ -694,6 +694,13 @@ decimal values stored as `TEXT` decimal strings** (NOT `REAL` — preserves `rus
 - **UI strings:** Slint **`@tr()`** (compile-time translation, gettext), **French first**, i18n-ready.
 - **NAIC↔neutral label set:** a **runtime-swappable data table** (not a translation) — the
   domain/method labels the user can switch; lives in data, loaded at runtime, distinct from `@tr()`.
+  Where it applies (réconcilié 2026-10-01 : décision Guy 2026-10-01, qui remplace celle du
+  2026-09-26 — Comparaison et PDF neutres) : every screen of the NAIC methodology and its PDF — the
+  study, the Comparison, the portfolio Revue; the PDFs receive the set in force from `app`
+  (`steadyinvest_report::ZoneNouns`, the one source of the zone nouns). Outside the methodology —
+  quick screen, criblage, holdings, watchlist, AI proposals — and in the MCP codes, neutral; the
+  holdings and the watchlist read the neutral set's nouns from the same source (the Slint global
+  `NeutralZones`, fed from `ZoneNouns::NEUTRAL`), never the active set (posture-tested).
 
 ### Enforcement Guidelines
 

@@ -394,8 +394,13 @@ pub(crate) fn rerender_comparison(
     c.set_notice(notice);
 }
 
-/// The report's value from the pushed global (one formatting path, no drift).
-fn report_value(ui: &MainWindow) -> steadyinvest_report::Comparison {
+/// The report's value from the pushed global (one formatting path, no drift), in the screen's
+/// zone nouns: the comparison is the NAIC Stock Comparison Guide, its PDF follows the active label
+/// set (`zones`, FR63 — owner decision, Guy 2026-10-01).
+fn report_value(
+    ui: &MainWindow,
+    zones: steadyinvest_report::ZoneNouns,
+) -> steadyinvest_report::Comparison {
     let c = ui.global::<Comparison>();
     let n = c.get_column_count().max(0) as usize;
     let cells = c.get_cells();
@@ -429,6 +434,7 @@ fn report_value(ui: &MainWindow) -> steadyinvest_report::Comparison {
         date: c.get_date().to_string(),
         currency_mix: c.get_currency_mix(),
         columns,
+        zones,
     }
 }
 
@@ -492,9 +498,10 @@ pub(crate) fn wire_comparison(ui: &MainWindow, s: &Session) {
     {
         let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(journal_state);
+        let config = Rc::clone(config);
         ui.global::<Comparison>().on_export_pdf(move || {
             let ui = ui_weak.unwrap();
-            let value = report_value(&ui);
+            let value = report_value(&ui, crate::labels::zone_nouns(config.borrow().label_set));
             let bytes = steadyinvest_report::render_comparison(&value);
             let mut dialog = rfd::FileDialog::new()
                 .set_title("Exporter la comparaison en PDF")

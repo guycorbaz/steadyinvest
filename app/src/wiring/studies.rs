@@ -603,6 +603,7 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
         // named file); cancel is a silent no-op. Read-only — rendering writes no journal.
         let ui_weak = ui.as_weak();
         let journal_state = Rc::clone(journal_state);
+        let config = Rc::clone(config);
         ui.global::<Studies>().on_export_study_pdf(move |id| {
             let ui = ui_weak.unwrap();
             let Ok(uuid) = Uuid::parse_str(&id) else {
@@ -633,9 +634,12 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
                 .map(|snap| {
                     crate::viewmodel::engine::quality_flags_line(snap.outputs(), &study.judgment)
                 });
+            // FR63 (owner decision, Guy 2026-10-01): the study is part of the NAIC methodology —
+            // its PDF says the zone nouns of the label set in force, as the study screen does.
             // Owner decision D (2026-10-03): the price origin's date in the price age's zone.
             let extras = steadyinvest_report::StudyPdfExtras {
                 quality_flags: flags.as_deref(),
+                zones: crate::labels::zone_nouns(config.borrow().label_set),
                 day_zone: journal_state.borrow().day_zone(),
             };
             let bytes = match steadyinvest_report::render_study_pdf_with(&study, numbers, &extras) {
