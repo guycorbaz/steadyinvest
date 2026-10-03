@@ -246,23 +246,24 @@ pub(crate) fn refresh_studies(ui: &MainWindow, state: &JournalState) {
         // "à compléter" flag — no second engine pass. A study that fails to normalize is "unknown":
         // absent potential ("—") and NOT flagged incomplete (a broken normalize must not shout).
         let snapshot = crate::viewmodel::engine::build_snapshot(&study).ok();
-        // Issue #189: when ONLY the dividend history is missing (EPS chain judged) the total is
-        // withheld by the core (absence ≠ 0) — the column then shows and sorts on the annualised
-        // appreciation alone, marked « (hors div.) » by `fmt_total_return`.
-        let return_outputs = snapshot.as_ref().map(|snap| &snap.outputs().returns);
-        let value = return_outputs.and_then(|r| {
-            r.projected_total_annualized_return_pct
-                .or_else(|| r.appreciation_only_potential())
-        });
-        let display = match return_outputs {
-            Some(r) => crate::viewmodel::engine::fmt_total_return(r, format),
-            None => crate::viewmodel::form::EMPTY_SLOT.to_string(),
-        };
         let incomplete = snapshot
             .as_ref()
             .is_some_and(crate::viewmodel::engine::study_incomplete);
-        // Guy's on-screen test (2026-09-30): the U/D ratio off the SAME snapshot. Guy, 2026-10-01
-        // (« Tri : U/D »): « — » and no sort value when the verdict is withheld — it sorts last.
+        // Issue #189: when ONLY the dividend history is missing (EPS chain judged) the total is
+        // withheld by the core (absence ≠ 0) — the column then shows and sorts on the annualised
+        // appreciation alone, marked « (hors div.) » by `fmt_total_return`. Guy, 2026-10-03
+        // (decision B): a withheld verdict lists « — » and sorts last, like the U/D column — the
+        // ONE `unless_withheld` rule behind both.
+        let (display, value) = match &snapshot {
+            Some(snap) => {
+                viewmodel::studies::potential_facts(&snap.outputs().returns, incomplete, format)
+            }
+            None => (crate::viewmodel::form::EMPTY_SLOT.to_string(), None),
+        };
+        // Guy's on-screen test (2026-09-30): the U/D ratio off the SAME snapshot. The list
+        // deliberately differs from the study screen here (Guy, 2026-10-01/03): « — » and no sort
+        // value for a withheld verdict (the study screen still shows the ratio over the open
+        // inputs), « ∞ » ranked as +∞ for an undefined ratio (the study screen shows « — »).
         let (ud, ud_value) = match &snapshot {
             Some(snap) => viewmodel::studies::ud_facts(
                 &snap.outputs().risk_reward.upside_downside,

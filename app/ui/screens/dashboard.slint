@@ -161,9 +161,10 @@ component StudyListRow inherits Rectangle {
             }
         }
         // Guy's on-screen test (2026-09-30): the upside/downside ratio right after the potential —
-        // a neutral FACT like it (no hue, right-aligned tabular figures, « — » when undefined or
-        // unknown, or when the verdict is withheld — Guy, 2026-10-01). Fixed-width slot so the
-        // column aligns across every row. Also the « Tri : U/D » sort key.
+        // a neutral FACT like it (no hue, right-aligned tabular figures; « ∞ » when undefined —
+        // price ≤ forecast low, Guy 2026-10-03; « — » when unknown or when the verdict is withheld,
+        // Guy 2026-10-01). Fixed-width slot so the column aligns across every row. Also the
+        // « Tri : U/D » sort key.
         Rectangle {
             width: 80px;
             background: transparent;
