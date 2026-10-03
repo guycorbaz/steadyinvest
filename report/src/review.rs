@@ -562,11 +562,12 @@ fn study_label(l: &ReviewLine) -> &'static str {
     }
 }
 
-/// The zone column: the active label set's noun, lowered like the column's other words
-/// (« zone basse » / « zone d'achat » — FR63), or the place outside the band.
+/// The zone column: the active label set's noun in the screen's own form, capitalised
+/// (« Zone basse » / « Zone d'achat » — FR63, as `review.slint`'s `zone-words`), or the place
+/// outside the band (lower case, as on the screen).
 fn zone_label(key: &str, zones: ZoneNouns) -> String {
     if let Some(noun) = zones.of_key(key) {
-        return lower(noun);
+        return noun.to_string();
     }
     match key {
         "below" => ZONE_BELOW,
@@ -1183,7 +1184,10 @@ mod tests {
             r.positions[0].other_high_zone = "CHF".into();
             r.positions[0].trigger = "sell".into();
             r.counts = vec![("high_zone".into(), "1".into())];
-            assert_eq!(zone_label("buy", zones), zones.low.to_lowercase());
+            // The column says the noun as the screen does: capitalised (« Zone d'achat »).
+            assert_eq!(zone_label("buy", zones), zones.low);
+            assert_eq!(zone_label("neutral", zones), zones.middle);
+            assert_eq!(zone_label("sell", zones), zones.high);
             assert_eq!(zone_label("below", zones), ZONE_BELOW);
             assert_eq!(zone_label("", zones), EM_DASH);
             let high = zones.high.to_lowercase();
@@ -1198,13 +1202,13 @@ mod tests {
                 bytes.windows(raw.len()).any(|w| w == raw.as_slice())
                     || bytes.windows(hex.len()).any(|w| w == hex.as_slice())
             };
-            assert!(shows(&zones.low.to_lowercase()), "zone column");
+            assert!(shows(zones.low), "zone column");
             assert!(shows(&format!("dans la {high} ou au-dessus :")));
             assert!(shows(&format!("Le prix est dans la {high}.")));
             assert!(shows(&format!("1   dans la {high} ou au-dessus")));
             for noun in [other.low, other.middle, other.high] {
                 assert!(
-                    !shows(&noun.to_lowercase()),
+                    !shows(noun) && !shows(&noun.to_lowercase()),
                     "{noun} leaks into the other set"
                 );
             }

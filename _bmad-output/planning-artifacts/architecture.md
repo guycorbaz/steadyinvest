@@ -651,7 +651,9 @@ decimal values stored as `TEXT` decimal strings** (NOT `REAL` — preserves `rus
   2026-09-26 — Comparaison et PDF neutres) : every screen of the NAIC methodology and its PDF — the
   study, the Comparison, the portfolio Revue; the PDFs receive the set in force from `app`
   (`steadyinvest_report::ZoneNouns`, the one source of the zone nouns). Outside the methodology —
-  quick screen, criblage, holdings, watchlist, AI proposals — and in the MCP codes, neutral.
+  quick screen, criblage, holdings, watchlist, AI proposals — and in the MCP codes, neutral; the
+  holdings and the watchlist read the neutral set's nouns from the same source (the Slint global
+  `NeutralZones`, fed from `ZoneNouns::NEUTRAL`), never the active set (posture-tested).
 
 ### Enforcement Guidelines
 

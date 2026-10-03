@@ -110,6 +110,26 @@ pub fn apply(ui: &crate::MainWindow, set: LabelSet) {
     labels.set_zone_sell(resolve("zone-sell"));
 }
 
+/// Push the NEUTRAL zone nouns into the `NeutralZones` Slint global, once, before the window shows.
+/// FR63 (owner decision, Guy 2026-10-01): the screens outside the NAIC methodology — the holdings
+/// and the watchlist — word the zones in the neutral set whatever the active one. The nouns are the
+/// neutral set's ([`ZoneNouns::NEUTRAL`]), the one source this table also reads — never a second
+/// copy. A label-set swap never touches them.
+pub fn apply_neutral_zones(ui: &crate::MainWindow) {
+    use slint::ComponentHandle;
+    let zones = ui.global::<crate::NeutralZones>();
+    let nouns = neutral_zone_nouns();
+    zones.set_zone_buy(nouns.low.into());
+    zones.set_zone_hold(nouns.middle.into());
+    zones.set_zone_sell(nouns.high.into());
+}
+
+/// The zone nouns of the screens outside the NAIC methodology: the neutral set, whatever the
+/// active one (FR63, 2026-10-01).
+pub fn neutral_zone_nouns() -> ZoneNouns {
+    zone_nouns(LabelSet::Neutral)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,6 +183,28 @@ mod tests {
         }
         assert_eq!(label(LabelSet::Naic, "zone-buy"), Some("Zone d'achat"));
         assert_eq!(label(LabelSet::Neutral, "zone-buy"), Some("Zone basse"));
+    }
+
+    #[test]
+    fn the_neutral_screens_nouns_are_the_neutral_sets_whatever_the_active_one() {
+        // FR63 (2026-10-01): holdings and watchlist never follow the active set.
+        assert_eq!(neutral_zone_nouns(), ZoneNouns::NEUTRAL);
+        assert_eq!(
+            neutral_zone_nouns().low,
+            label(LabelSet::Neutral, "zone-buy").unwrap()
+        );
+        assert_eq!(
+            neutral_zone_nouns().middle,
+            label(LabelSet::Neutral, "zone-hold").unwrap()
+        );
+        assert_eq!(
+            neutral_zone_nouns().high,
+            label(LabelSet::Neutral, "zone-sell").unwrap()
+        );
+        assert_ne!(
+            neutral_zone_nouns().low,
+            label(LabelSet::Naic, "zone-buy").unwrap()
+        );
     }
 
     #[test]

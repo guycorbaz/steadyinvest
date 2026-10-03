@@ -803,10 +803,12 @@ mod tests {
         // title's « actuelle » form and three basis lines replace « Décision du {} »: 1170 − 1 + 4
         // = 1173, measured.
         // FR63 (owner decision, Guy 2026-10-01): the comparison's rows 17–19 and its row-20 words
-        // read the active label set (`Labels.zone-*`), not literals: 1173 − 6 = 1167 (the six
-        // literals removed, counted).
+        // read the active label set (`Labels.zone-*`), not literals: six literals removed. Probed
+        // after the change (PR #290 review): 1172, measured — main's floor (1173) sat 5 below its
+        // real total (1178 = 1172 + 6), so the drifted tally above is corrected here, not re-derived.
+        // The holdings and watchlist reading `NeutralZones` instead of `Labels` changes no literal.
         assert!(
-            total >= 1167,
+            total >= 1172,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -890,6 +892,59 @@ mod tests {
             }
         }
         assert!(hits.is_empty(), "hard-coded zone nouns: {hits:#?}");
+    }
+
+    /// FR63 (owner decision, Guy 2026-10-01): the screens outside the NAIC methodology word the
+    /// zones in the NEUTRAL set whatever the active one, and they get those nouns from ONE source —
+    /// the `NeutralZones` global, pushed by `labels::apply_neutral_zones` from
+    /// `steadyinvest_report::ZoneNouns::NEUTRAL` (the test above already forbids a literal noun).
+    /// So: a neutral screen never reads the active set (`Labels.zone-*`); a NAIC-methodology
+    /// screen or component never reads the neutral one; the global carries no default literal.
+    /// The study list (`dashboard.slint`) is left out of both rules: its classification is
+    /// pending with the owner, and it keeps reading the active set as on main.
+    #[test]
+    fn neutral_screens_read_the_neutral_zone_source_never_the_active_set() {
+        const NEUTRAL_SCREENS: [&str; 4] = [
+            "watchlist.slint",
+            "portfolio.slint",
+            "quick_screen.slint",
+            "propositions.slint",
+        ];
+        const UNCLASSIFIED: [&str; 1] = ["dashboard.slint"];
+        let mut hits = Vec::new();
+        let mut neutral_reads = 0;
+        for path in slint_files() {
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            let source = std::fs::read_to_string(&path).unwrap();
+            if NEUTRAL_SCREENS.contains(&name.as_str()) {
+                if source.contains("Labels.zone-") {
+                    hits.push(format!(
+                        "{name}: a neutral screen reads the active set (Labels.zone-*)"
+                    ));
+                }
+                neutral_reads += source.matches("NeutralZones.zone-").count();
+            } else if !UNCLASSIFIED.contains(&name.as_str()) && source.contains("NeutralZones.") {
+                hits.push(format!(
+                    "{name}: reads NeutralZones but is not a neutral screen"
+                ));
+            }
+            if name == "state.slint" {
+                let start = source
+                    .find("export global NeutralZones")
+                    .expect("the NeutralZones global is declared in state.slint");
+                let body = &source[start..start + source[start..].find('}').unwrap()];
+                if body.contains('"') {
+                    hits.push("state.slint: NeutralZones carries a literal default".into());
+                }
+            }
+        }
+        assert!(hits.is_empty(), "zone-source violations: {hits:#?}");
+        // The watchlist summary, the holdings candidates (5), zone column (3) and sell trigger:
+        // a scan that finds none of them is broken, not clean.
+        assert!(
+            neutral_reads >= 10,
+            "only {neutral_reads} NeutralZones reads found in the neutral screens — scan broken?"
+        );
     }
 
     #[test]
