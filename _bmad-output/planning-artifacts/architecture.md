@@ -494,8 +494,7 @@ against this skeleton as the principal go/no-go before committing UI work.
   `FetchedFinancials.reported_currencies` → « comptes publiés en EUR, cotation en GBP »); pinned by
   the trimmed real extract `ingestion/tests/fixtures/eodhd-*-ULVR-real.json`.
   Statements reported in another currency than the listing are applied with a named
-  **warning**. **Décision en attente (Guy) : comptes publiés dans une autre devise — avertir ou
-  bloquer.**
+  **warning**. **Décision Guy 2026-10-01 (réconcilié 2026-10-03) : comptes publiés dans une autre devise que la cotation — acceptés avec l'avertissement nommé, jamais bloqués (NOVN, ABB : cotés en CHF à SIX) ; une conversion au taux moyen de chaque exercice reste à proposer en story.**
 - **Errors:** `thiserror` 2.0 domain errors per crate; neutral, cause-named messages; **no silent
   `.ok()`** (explicit lesson from the prior project's chart-rendering bugs).
 

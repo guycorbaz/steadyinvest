@@ -289,8 +289,7 @@ applied (no price, no trailing-stop ratchet, no price history) until the study i
 study in the hundredths code itself (`GBX`) is told the major currency it belongs in (réconcilié
 2026-10-03 : revue PR #291). Statements **reported** in another currency than the listing are
 **applied with a named warning**, per the rule above (réconcilié 2026-10-01 : PR #277 ; conversion
-des centièmes, décision Guy 2026-10-01). Décision en attente (Guy) : comptes publiés dans une autre
-devise que la cotation — avertir (état actuel) ou bloquer.
+des centièmes, décision Guy 2026-10-01). Décision Guy 2026-10-01 (réconcilié 2026-10-03) : comptes publiés dans une autre devise que la cotation — acceptés avec l'avertissement nommé, jamais bloqués (NOVN, ABB : cotés en CHF à SIX) ; une conversion au taux moyen de chaque exercice reste à proposer en story.
 
 **`split_series_break` — normative detection rule** *(absorbed at ssg-1.1.0; quantifies
 "inconsistent with sales")*:

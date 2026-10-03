@@ -763,8 +763,7 @@ withholding-refund tracking, export/share, eventual public release.
   2026-10-01). The statements and the trailing EPS of a hundredths listing are never divided —
   vérifié 2026-10-03 sur ULVR.LSE: prices in pence (GBX), trailing EPS 2.18 in GBP (the served P/E
   20.57 = 44.835 GBP ÷ 2.18), statements in EUR; a London listing may report in such a third
-  currency, which falls under the mixed-currency warning above. Décision en attente (Guy) : comptes publiés dans une autre devise que la cotation —
-  avertir (code actuel, spec méthode §3) ou bloquer.
+  currency, which falls under the mixed-currency warning above. Décision Guy 2026-10-01 (réconcilié 2026-10-03) : comptes publiés dans une autre devise que la cotation — acceptés avec l'avertissement nommé, jamais bloqués (NOVN, ABB : cotés en CHF à SIX) ; une conversion au taux moyen de chaque exercice reste à proposer en story.
 - FR6 **[P1]:** The user can set judgment inputs (future growth, forecast P/E, low-price method) and
   see results recompute.
 - FR7 **[P1]:** The system raises methodology quality flags per the thresholds in Appendix A.
