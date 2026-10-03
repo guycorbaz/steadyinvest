@@ -529,17 +529,25 @@ impl JournalState {
         self.mutate_judgment(study_id, move |judgment| {
             let before = judgment.current_price;
             let known = apply_judgment_field(judgment, field, value);
-            if known && field == "current_price" && judgment.current_price != before {
-                judgment.current_price_origin =
-                    judgment
-                        .current_price
-                        .map(|_| steadyinvest_contract::PriceOrigin {
-                            source: Source::Manual,
-                            at: now.clone(),
-                            session_date: None,
-                            freshness: Freshness::Current,
-                            aged: false,
-                        });
+            if known && field == "current_price" {
+                let typed = steadyinvest_contract::PriceOrigin {
+                    source: Source::Manual,
+                    at: now.clone(),
+                    session_date: None,
+                    freshness: Freshness::Current,
+                    aged: false,
+                };
+                // FR23 age horizon (review of PR #293): the same value retyped on a LATER day than
+                // the price's day confirms it — a real write that makes it fresh again. The same
+                // day stays a no-op (no undo step, no history entry).
+                let renewed = judgment.current_price.is_some()
+                    && steadyinvest_report::price_age::same_price_renews(
+                        judgment.current_price_origin.as_ref(),
+                        &typed,
+                    );
+                if judgment.current_price != before || renewed {
+                    judgment.current_price_origin = judgment.current_price.map(|_| typed);
+                }
             }
             known
         })

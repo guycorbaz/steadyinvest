@@ -139,21 +139,30 @@ fn study_json(study: &Study) -> Value {
 /// `get_study`: the study, its status and its computed outputs. A study the engine cannot
 /// normalize still returns its data, with `computed: null` and the reason. The current price is
 /// aged on `now`'s day with the owner's horizon (FR23) before the verdict is computed — the same
-/// read-time rule as the app (`report::price_age`; the mark is never serialized).
+/// read-time rule as the app (`report::price_age`; the mark is never serialized). Since the study
+/// JSON's `current_price_origin.freshness` only carries a failed refresh's flag, `computed` states
+/// the age explicitly (review of PR #293): `price_aged` (the current price is past the horizon on
+/// this read — why an `open_gates` entry can say `stale` while the freshness says `current`) and
+/// `price_stale_after_trading_days` (the horizon used).
 pub fn study_read(read: &McpStudyRead, now: &Timestamp, price_stale_after: u32) -> Value {
+    use steadyinvest_report::price_age;
     let mut study = read.study.clone();
-    steadyinvest_report::price_age::apply_price_age(
-        &mut study,
-        steadyinvest_report::price_age::Day::of(now),
-        price_stale_after,
-    );
+    price_age::apply_price_age(&mut study, price_age::today(now), price_stale_after);
+    let price_aged = study.judgment.current_price.is_some()
+        && match study.judgment.current_price_origin.as_ref() {
+            Some(origin) => origin.aged,
+            None => price_age::unknown_origin_is_aged(),
+        };
     let mut v = json!({
         "status": read.status,
         "study": study_json(&study),
     });
     match steadyinvest_report::form::build_snapshot(&study) {
         Ok(snapshot) => {
-            v["computed"] = computed(&snapshot, &study);
+            let mut c = computed(&snapshot, &study);
+            c["price_aged"] = Value::Bool(price_aged);
+            c["price_stale_after_trading_days"] = json!(price_stale_after);
+            v["computed"] = c;
         }
         Err(e) => {
             v["computed"] = Value::Null;
@@ -396,9 +405,32 @@ mod tests {
             "{aged}"
         );
         assert!(!aged["study"].to_string().contains("aged"));
+        let wider = study_read(&read, &tuesday, 2);
+        assert_eq!(wider["computed"]["verdict_state"], json!("full"));
+        // Review of PR #293: the study JSON's freshness still says `current` (no failed refresh),
+        // so `computed` states the age and the horizon explicitly — no self-contradiction.
         assert_eq!(
-            study_read(&read, &tuesday, 2)["computed"]["verdict_state"],
-            json!("full")
+            aged["study"]["judgment"]["current_price_origin"]["freshness"],
+            json!("current")
+        );
+        assert_eq!(aged["computed"]["price_aged"], json!(true));
+        assert_eq!(aged["computed"]["price_stale_after_trading_days"], json!(1));
+        assert!(
+            aged["computed"]["open_gates"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|g| g["state"] == json!("stale")),
+            "{aged}"
+        );
+        assert_eq!(
+            study_read(&read, &monday, 1)["computed"]["price_aged"],
+            json!(false)
+        );
+        assert_eq!(wider["computed"]["price_aged"], json!(false));
+        assert_eq!(
+            wider["computed"]["price_stale_after_trading_days"],
+            json!(2)
         );
     }
 

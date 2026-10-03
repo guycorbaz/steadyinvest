@@ -11214,6 +11214,83 @@ mod price_origin {
         state.set_price_stale_after(4);
         assert!(!origin(&state, id).unwrap().aged);
     }
+
+    // Review of PR #293: the same value retyped on a LATER day than the price's day confirms it —
+    // the price is fresh again; the same day stays a no-op (no undo step).
+    #[test]
+    fn retyping_the_same_price_on_a_later_day_makes_it_fresh_again() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0xA2, NOW); // NOW: Thursday 2026-10-01
+        let id = state.create_study("NESN", "CHF").unwrap();
+        state
+            .apply_provider_refresh(id, &fetched_with_price(&YEARS, 60))
+            .unwrap();
+        ready(&mut state, id);
+        state
+            .set_judgment_field(id, "current_price", Some(und_money(58)))
+            .unwrap();
+        // Typed on Tuesday: two trading days old on Thursday.
+        dated(&mut state, id, "2026-09-29T10:00:00Z", None);
+        assert!(origin(&state, id).unwrap().aged);
+        assert!(verdict_open(&state, id).is_some(), "aged: not Full");
+        let depth = state.undo_depth();
+        state
+            .set_judgment_field(id, "current_price", Some(und_money(58)))
+            .unwrap();
+        let o = origin(&state, id).unwrap();
+        assert_eq!(
+            (o.source, o.at.0.as_str(), o.aged),
+            (Source::Manual, NOW, false)
+        );
+        assert_eq!(verdict_open(&state, id), None, "confirmed today: Full");
+        assert_eq!(state.undo_depth(), depth + 1, "a real write, undoable");
+        // Again the same day: a no-op.
+        state
+            .set_judgment_field(id, "current_price", Some(und_money(58)))
+            .unwrap();
+        assert_eq!(state.undo_depth(), depth + 1, "same day, same value: no-op");
+        // A fetched quote retyped the same day keeps its provider origin.
+        state
+            .apply_holding_price(id, rust_decimal::Decimal::new(61, 0), None)
+            .unwrap();
+        let depth = state.undo_depth();
+        state
+            .set_judgment_field(id, "current_price", Some(und_money(61)))
+            .unwrap();
+        assert_eq!(origin(&state, id).unwrap().source, Source::Provider);
+        assert_eq!(state.undo_depth(), depth);
+    }
+
+    // Review of PR #293: a fetch bringing the same quote WITHOUT a session date on a later day
+    // renews its fetch date (its age); the same day — or the same session — stays a no-op.
+    #[test]
+    fn the_same_quote_fetched_on_a_later_day_without_a_session_is_fresh_again() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0xA3, NOW); // NOW: Thursday 2026-10-01
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let price = rust_decimal::Decimal::new(60, 0);
+        state.apply_holding_price(id, price, None).unwrap();
+        dated(&mut state, id, "2026-09-29T10:00:00Z", None);
+        assert!(origin(&state, id).unwrap().aged);
+        let depth = state.undo_depth();
+        state.apply_holding_price(id, price, None).unwrap();
+        let o = origin(&state, id).unwrap();
+        assert_eq!((o.at.0.as_str(), o.aged), (NOW, false));
+        assert_eq!(state.undo_depth(), depth + 1, "a real write");
+        state.apply_holding_price(id, price, None).unwrap();
+        assert_eq!(state.undo_depth(), depth + 1, "same day, same quote: no-op");
+        // The same quote for the same OLD session (an exchange holiday, no new close): the session
+        // date is its age — nothing to renew, it stays « périmé ».
+        dated(&mut state, id, "2026-09-29T10:00:00Z", Some("2026-09-29"));
+        let depth = state.undo_depth();
+        state
+            .apply_holding_price(id, price, Some("2026-09-29".to_string()))
+            .unwrap();
+        let o = origin(&state, id).unwrap();
+        assert_eq!(o.at.0, "2026-09-29T10:00:00Z", "untouched");
+        assert!(o.aged);
+        assert_eq!(state.undo_depth(), depth);
+    }
 }
 
 // ── FR5 / FR10 (project review 2026-10-01) — figures in another currency are never applied ──

@@ -17,6 +17,12 @@
 //!   Tuesday;
 //! - it is **aged** when that age exceeds the horizon. An unknown origin (a price written before
 //!   origins were recorded) or an unreadable date is never called aged — absent, never wrong.
+//!
+//! Two owner decisions are still pending (Guy, review of PR #293), each held in ONE place here so
+//! the answer is a local change: what an **unknown origin** means ([`unknown_origin_is_aged`]) and
+//! in which time zone a stamp's **day** is read ([`Day::of`], UTC today; [`today`] goes through it).
+//! There is no exchange-holiday calendar: after a holiday, the last close counts as one trading day
+//! older than it is, so with the default horizon it is « périmé » until the next close is fetched.
 
 use steadyinvest_contract::{PriceOrigin, Source, Study, Timestamp};
 
@@ -47,7 +53,10 @@ impl Day {
         Some(Day(days_from_civil(y, m, day)))
     }
 
-    /// The UTC day of an app-clock stamp.
+    /// The day of an app-clock stamp — THE one reading of a stamp's day: the age computation,
+    /// [`today`], [`same_price_renews`] and the app's « written today » test all go through it.
+    /// Read in **UTC** (the stamp's own date part). Owner decision pending (Guy): the owner's
+    /// local day instead would be a change here only.
     pub fn of(t: &Timestamp) -> Option<Day> {
         Day::parse(&t.0)
     }
@@ -112,11 +121,44 @@ pub fn price_is_aged(origin: &PriceOrigin, today: Day, horizon: u32) -> bool {
     price_day(origin).is_some_and(|day| trading_days_after(day, today, horizon) > horizon)
 }
 
+/// Today, from the injected clock's `now` ([`Day::of`] — the same day reading as a price's).
+pub fn today(now: &Timestamp) -> Option<Day> {
+    Day::of(now)
+}
+
+/// What a present price with **no recorded origin** (written before origins were recorded) means
+/// for its age — THE one place that decides it. Today: never aged (absent, never wrong), so such a
+/// price never goes « périmé » by age. Owner decision pending (Guy): answering « aged » is this
+/// one value — the verdict gate (`form::price_to_gate_state`), the MCP `price_aged` and
+/// [`same_price_renews`] all ask it.
+pub const fn unknown_origin_is_aged() -> bool {
+    false
+}
+
+/// Does writing the SAME price value again with origin `written` over the `recorded` origin renew
+/// it? Yes when the written price stands for a **later day** than the recorded one ([`price_day`],
+/// [`Day::of`] — the age computation's own reading), so a confirmed price becomes fresh again: the
+/// owner retyping the same value on a later day, or a fetch on a later day bringing the same quote
+/// without a session date. The same day — or the same provider session — stays a no-op (no undo
+/// step, no history entry). An unknown recorded origin renews only if it counts as aged
+/// ([`unknown_origin_is_aged`]); an unreadable date never renews (it never aged either).
+pub fn same_price_renews(recorded: Option<&PriceOrigin>, written: &PriceOrigin) -> bool {
+    match recorded {
+        None => unknown_origin_is_aged(),
+        Some(recorded) => match (price_day(recorded), price_day(written)) {
+            (Some(old), Some(new)) => new > old,
+            _ => false,
+        },
+    }
+}
+
 /// Mark the read copy of `study` with the age rule: [`PriceOrigin::aged`] set when the current
 /// price is older than the horizon, cleared otherwise. Never persisted (the contract skips the
 /// field) — call it on what is READ for display, on every read (the setting and today move).
 pub fn apply_price_age(study: &mut Study, today: Option<Day>, horizon: u32) {
     let present = study.judgment.current_price.is_some();
+    // No origin, no mark: what an unknown origin means is [`unknown_origin_is_aged`], asked by
+    // the verdict gate itself (`form::price_to_gate_state`).
     if let Some(origin) = study.judgment.current_price_origin.as_mut() {
         origin.aged = present && today.is_some_and(|t| price_is_aged(origin, t, horizon));
     }
@@ -307,6 +349,42 @@ mod tests {
         study.judgment.current_price = None;
         apply_price_age(&mut study, Some(day("2026-10-06")), 1);
         assert!(!aged(&study));
+    }
+
+    #[test]
+    fn the_same_price_renews_only_on_a_later_day() {
+        let typed_tue = origin(Source::Manual, "2026-09-29T10:00:00Z", None);
+        let typed_thu = origin(Source::Manual, "2026-10-01T09:00:00Z", None);
+        let typed_thu_late = origin(Source::Manual, "2026-10-01T18:00:00Z", None);
+        assert!(same_price_renews(Some(&typed_tue), &typed_thu));
+        assert!(
+            !same_price_renews(Some(&typed_thu), &typed_thu_late),
+            "same day"
+        );
+        assert!(!same_price_renews(Some(&typed_thu), &typed_tue), "earlier");
+        // A fetch without a session date: its fetch date is its day.
+        let fetched_tue = origin(Source::Provider, "2026-09-29T10:00:00Z", None);
+        let fetched_thu = origin(Source::Provider, "2026-10-01T09:00:00Z", None);
+        assert!(same_price_renews(Some(&fetched_tue), &fetched_thu));
+        // The same session fetched later: the session is its day — nothing renews.
+        let session_tue = origin(Source::Provider, "2026-09-29T20:00:00Z", Some("2026-09-29"));
+        let session_tue_again =
+            origin(Source::Provider, "2026-10-01T09:00:00Z", Some("2026-09-29"));
+        assert!(!same_price_renews(Some(&session_tue), &session_tue_again));
+        // A typed confirmation today renews yesterday's close.
+        assert!(same_price_renews(Some(&session_tue), &typed_thu));
+        // Unknown origin: the one policy (never aged today) — nothing to renew.
+        assert_eq!(
+            same_price_renews(None, &typed_thu),
+            unknown_origin_is_aged()
+        );
+        // An unreadable recorded date never aged, so never renews.
+        let garbage = origin(Source::Manual, "garbage", None);
+        assert!(!same_price_renews(Some(&garbage), &typed_thu));
+        assert_eq!(
+            today(&Timestamp("2026-10-01T23:59:59Z".to_string())),
+            Some(day("2026-10-01"))
+        );
     }
 
     #[test]

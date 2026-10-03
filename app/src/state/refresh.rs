@@ -426,34 +426,41 @@ fn count_provider_to_stale(study: &Study, today: &Timestamp) -> usize {
 /// Write a provider quote and its origin (Guy's on-screen test 2026-10-01, FR11). The SAME quote
 /// for the same session, already current, keeps its origin untouched — a repeated refresh writes
 /// nothing (no undo step, no history entry, no `logical_version` bump; the timestamp-churn trap).
+/// FR23 age horizon (review of PR #293): the same quote WITHOUT a session date fetched on a later
+/// day than the recorded one is a real write — its fetch date is its age, so it becomes fresh
+/// again ([`steadyinvest_report::price_age::same_price_renews`]); the same day stays a no-op.
 fn set_provider_price(
     judgment: &mut steadyinvest_contract::Judgment,
     price: Money,
     at: &Timestamp,
     session_date: Option<String>,
 ) {
-    let unchanged = judgment.current_price == Some(price)
-        && judgment.current_price_origin.as_ref().is_some_and(|o| {
-            o.source == Source::Provider
-                && o.freshness == Freshness::Current
-                && o.session_date == session_date
-        });
-    if unchanged {
-        return;
-    }
-    judgment.current_price = Some(price);
-    judgment.current_price_origin = Some(PriceOrigin {
+    let fetched = PriceOrigin {
         source: Source::Provider,
         at: at.clone(),
         session_date,
         freshness: Freshness::Current,
         aged: false,
-    });
+    };
+    let recorded = judgment.current_price_origin.as_ref();
+    let unchanged = judgment.current_price == Some(price)
+        && recorded.is_some_and(|o| {
+            o.source == Source::Provider
+                && o.freshness == Freshness::Current
+                && o.session_date == fetched.session_date
+        })
+        && !steadyinvest_report::price_age::same_price_renews(recorded, &fetched);
+    if unchanged {
+        return;
+    }
+    judgment.current_price = Some(price);
+    judgment.current_price_origin = Some(fetched);
 }
 
-/// The UTC day of a stamp (`2026-10-01`).
-fn day_of(t: &Timestamp) -> &str {
-    t.0.get(..10).unwrap_or(&t.0)
+/// The day of a stamp — the age computation's own reading
+/// ([`steadyinvest_report::price_age::Day::of`], one place for its time zone).
+fn day_of(t: &Timestamp) -> Option<steadyinvest_report::price_age::Day> {
+    steadyinvest_report::price_age::Day::of(t)
 }
 
 /// Would a failed refresh flag this study's price stale? Only a fetched price, not already stale,
@@ -464,7 +471,10 @@ fn price_would_go_stale(judgment: &steadyinvest_contract::Judgment, today: &Time
         && judgment.current_price_origin.as_ref().is_some_and(|o| {
             o.source == Source::Provider
                 && o.freshness != Freshness::Stale
-                && day_of(&o.at) != day_of(today)
+                && match (day_of(&o.at), day_of(today)) {
+                    (Some(written), Some(today)) => written != today,
+                    _ => true, // an unreadable day is not « today »
+                }
         })
 }
 

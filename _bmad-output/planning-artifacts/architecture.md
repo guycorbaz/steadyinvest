@@ -473,7 +473,15 @@ against this skeleton as the principal go/no-go before committing UI work.
   the session date (else the fetch or typing date), `report::price_age` marks the **read copy**
   (`PriceOrigin::aged`, `#[serde(skip)]` — never persisted, so a changed horizon applies on the next
   read) in `JournalState::try_get_study` and in the MCP `get_study`; `PriceOrigin::is_stale()` is the
-  one test the verdict, the traceability and the PDF use. An unknown symbol's notice
+  one test the verdict, the traceability and the PDF use. The same price written again for a later
+  day (retyped, or fetched without a session date) renews its origin
+  (`price_age::same_price_renews`); the same day or session stays a no-op. The MCP `get_study`
+  states the age as `computed.price_aged` + `computed.price_stale_after_trading_days`, since the
+  study JSON's `freshness` carries only a failed refresh's flag. No holiday calendar: after an
+  exchange holiday the last close is stale at horizon 1 until the next close. Pending owner
+  decisions, each one place in `report::price_age`: the day is read in UTC (`Day::of`), and a price
+  with no recorded origin never ages (`unknown_origin_is_aged`) (réconcilié 2026-10-03 : revue
+  PR #293). An unknown symbol's notice
   names the app's ticker convention (`.DE` → `.XETRA`, `.AX` → `.AU`; `ingestion::ticker`). A
   provider listing currency different from the study's is **refused** before anything is applied,
   as is a listing quoted in hundredths (GBX, GBp, ZAc, ILA); statements reported in another
@@ -913,7 +921,9 @@ and architecture decisions A1–A13 below are final._
   state, and must never re-derive a value (Cardinal Rule). The quality flags it returns follow the
   same presentation rule as the screens — `core::ssg::shown_quality_flags` (the highest high-P/E
   threshold only), shared by `app` and `mcp` — and `computed.quality_flags_assessable` tells an empty
-  list meaning « none » from « not assessable » (réconcilié 2026-10-01 : PR #285).
+  list meaning « none » from « not assessable » (réconcilié 2026-10-01 : PR #285). `computed` also
+  carries `price_aged` and `price_stale_after_trading_days` — the current price's FR23 age on this
+  read and the horizon used (réconcilié 2026-10-03 : revue PR #293).
 
 ### A2 — Per-call connection, no lock, version gate
 

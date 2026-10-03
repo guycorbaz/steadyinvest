@@ -169,6 +169,8 @@ pub fn price_to_gate_state(
     match (value, origin) {
         (None, _) => GateState::Missing,
         (Some(_), Some(o)) if o.is_stale() => GateState::Stale,
+        // A price with no recorded origin: the one policy decides (never aged today).
+        (Some(_), None) if crate::price_age::unknown_origin_is_aged() => GateState::Stale,
         (Some(_), _) => GateState::ValidatedFresh,
     }
 }
