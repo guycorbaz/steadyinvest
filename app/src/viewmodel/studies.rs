@@ -41,6 +41,12 @@ pub struct StudyReturn {
     /// 2026-07-12 — the study's user-entered company name (empty when unset), shown after the
     /// ticker on the list row. Owned (read off the full study during refresh, not the summary).
     pub company_name: String,
+    /// Issue #294 (Guy, 2026-10-03): the U/D emoticon beside the ticker, classified off `ud_value`
+    /// by [`ud_mood`] — `None` exactly when the U/D column reads « — ».
+    pub ud_mood: Option<UdMood>,
+    /// Issue #294: the verdict is provisional (e.g. a stale or undated price, PR #293) — the
+    /// emoticon is drawn greyed. Never set for a withheld verdict (no emoticon there).
+    pub provisional: bool,
 }
 
 impl Default for StudyReturn {
@@ -57,6 +63,8 @@ impl Default for StudyReturn {
             incomplete: false,
             zone: "",
             company_name: String::new(),
+            ud_mood: None,
+            provisional: false,
         }
     }
 }
@@ -113,6 +121,105 @@ pub fn ud_facts(
     })
 }
 
+/// Issue #294 (Guy, 2026-10-03): the default high U/D threshold of the list's emoticon — 3, the
+/// NAIC 25/50/25 boundary (owner's wording). Canonical spelling (see [`parse_ud_threshold`]).
+pub const DEFAULT_UD_HIGH: &str = "3";
+/// Issue #294: the default low U/D threshold — one third, held as the fraction « 1/3 » (exact
+/// input; see [`parse_ud_threshold`] for how it compares).
+pub const DEFAULT_UD_LOW: &str = "1/3";
+
+/// A U/D threshold's canonical spelling → its value (issue #294). Two forms, both strictly
+/// positive:
+/// - a decimal (« 3 », « 0.33 » — the canonical, point spelling app-config stores; the Réglages
+///   field reads it in the user's number format);
+/// - a fraction of two whole numbers « n/d » (« 1/3 »), `d > 0`.
+///
+/// Exact decimals, never `f64`. A fraction's value is the `Decimal` quotient `n / d` — the SAME
+/// `checked_div` the core uses for the ratio (`(high − price) / (price − low)`), so a ratio of
+/// exactly one third lands ON the « 1/3 » threshold, not a rounding hair below it (tested).
+pub fn parse_ud_threshold(canonical: &str) -> Option<Decimal> {
+    let s = canonical.trim();
+    let value = match s.split_once('/') {
+        Some((n, d)) => {
+            let whole = |part: &str| {
+                let part = part.trim();
+                (!part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+                    .then(|| Decimal::from_str_exact(part).ok())
+                    .flatten()
+            };
+            let (n, d) = (whole(n)?, whole(d)?);
+            if d.is_zero() {
+                return None;
+            }
+            n.checked_div(d)?
+        }
+        None => Decimal::from_str_exact(s).ok()?,
+    };
+    (value > Decimal::ZERO).then_some(value)
+}
+
+/// The pair of U/D thresholds the list's emoticon compares against (issue #294); `low < high`
+/// always (the config accessor falls back to the defaults whole otherwise, the size-table rule).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UdThresholds {
+    pub low: Decimal,
+    pub high: Decimal,
+}
+
+impl UdThresholds {
+    /// A pair from its canonical spellings: `None` unless both parse and `low < high` — the ONE
+    /// ordering rule behind the config accessor and the list's classification.
+    pub fn from_spellings(high: &str, low: &str) -> Option<Self> {
+        let (high, low) = (parse_ud_threshold(high)?, parse_ud_threshold(low)?);
+        (low < high).then_some(UdThresholds { low, high })
+    }
+}
+
+impl Default for UdThresholds {
+    fn default() -> Self {
+        UdThresholds::from_spellings(DEFAULT_UD_HIGH, DEFAULT_UD_LOW)
+            .expect("the default thresholds parse and are ordered")
+    }
+}
+
+/// The list's U/D emoticon (issue #294, Guy 2026-10-03). Screen only, never in a PDF.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UdMood {
+    /// 🙂 — the ratio is at or above the high threshold.
+    High,
+    /// 🙂 — the ratio is undefined: price at or below the forecast low (« ∞ », decision A).
+    Unbounded,
+    /// 😐 — between the thresholds (`low ≤ ratio < high`).
+    Middle,
+    /// 🙁 — the ratio is below the low threshold.
+    Low,
+}
+
+impl UdMood {
+    /// The wire key the `.slint` row reads (`StudyRow.ud-mood`); "" = no emoticon.
+    pub fn key(self) -> &'static str {
+        match self {
+            UdMood::High => "high",
+            UdMood::Unbounded => "unbounded",
+            UdMood::Middle => "middle",
+            UdMood::Low => "low",
+        }
+    }
+}
+
+/// THE emoticon classification (issue #294), pure, keyed off the U/D column's own sort value so
+/// the two never disagree: no value (« — » — withheld verdict, unknown ratio) → no emoticon;
+/// `Unbounded` (« ∞ ») → 🙂; a ratio `≥ high` → 🙂, `< low` → 🙁, otherwise 😐. Edges: exactly
+/// `high` is 🙂, exactly `low` is 😐. Exact decimal comparisons.
+pub fn ud_mood(rank: Option<UdRank>, thresholds: UdThresholds) -> Option<UdMood> {
+    Some(match rank? {
+        UdRank::Unbounded => UdMood::Unbounded,
+        UdRank::Ratio(r) if r >= thresholds.high => UdMood::High,
+        UdRank::Ratio(r) if r < thresholds.low => UdMood::Low,
+        UdRank::Ratio(_) => UdMood::Middle,
+    })
+}
+
 /// The list's potentiel facts (issue #107, #189; Guy, 2026-10-03, decision B): withheld verdict
 /// → « — », no value ([`unless_withheld`], as the U/D column); otherwise the §5 projected total
 /// annualized return, or the appreciation-only fallback marked « (hors div.) » (#189), « — » when
@@ -134,26 +241,23 @@ pub fn potential_facts(
 
 /// Map one summary row into the Slint `StudyRow` (id stringified, date trimmed to the day, status
 /// verbatim, the pre-formatted potential-return string — "—" when the study withholds it — the
-/// issue #148 `incomplete` flag driving the "à compléter" marker, the present-price zone key, and
-/// the company name shown after the ticker).
-pub fn to_row(
-    summary: &StudySummary,
-    potential_return: &str,
-    ud_ratio: &str,
-    incomplete: bool,
-    zone: &str,
-    company_name: &str,
-) -> StudyRow {
+/// issue #148 `incomplete` flag driving the "à compléter" marker, the present-price zone key, the
+/// company name shown after the ticker, and the issue #294 U/D emoticon with its greyed flag).
+pub fn to_row(summary: &StudySummary, facts: &StudyReturn) -> StudyRow {
     StudyRow {
         id: summary.id.to_string().into(),
         ticker: summary.security_ticker.clone().into(),
         created_at: created_at_date(&summary.created_at).into(),
         status: summary.status.clone().into(),
-        potential_return: potential_return.into(),
-        ud_ratio: ud_ratio.into(),
-        incomplete,
-        zone: zone.into(),
-        company_name: company_name.into(),
+        potential_return: facts.display.as_str().into(),
+        ud_ratio: facts.ud.as_str().into(),
+        incomplete: facts.incomplete,
+        zone: facts.zone.into(),
+        company_name: facts.company_name.as_str().into(),
+        // Issue #294: the emoticon key ("" = none) and its greyed flag — the flag only matters
+        // when there is an emoticon, so it is cleared with it.
+        ud_mood: facts.ud_mood.map(UdMood::key).unwrap_or_default().into(),
+        ud_mood_greyed: facts.provisional && facts.ud_mood.is_some(),
         // Story 8.5a: filled after curation from the draft inbox's counts
         // (`wiring::drafts::apply_row_counts`).
         pending_drafts: 0,
@@ -279,14 +383,7 @@ pub fn curate(
     kept.iter()
         .map(|s| {
             let facts = returns.get(&s.id).unwrap_or(&empty);
-            to_row(
-                s,
-                facts.display.as_str(),
-                facts.ud.as_str(),
-                facts.incomplete,
-                facts.zone,
-                facts.company_name.as_str(),
-            )
+            to_row(s, facts)
         })
         .collect()
 }
@@ -333,6 +430,8 @@ mod tests {
             incomplete: false,
             zone: "",
             company_name: String::new(),
+            ud_mood: None,
+            provisional: false,
         }
     }
 
@@ -816,6 +915,8 @@ mod tests {
                 incomplete: true,
                 zone: "",
                 company_name: String::new(),
+                ud_mood: None,
+                provisional: false,
             },
         );
         // id 2 (ROG) deliberately absent → defaults to not incomplete.
@@ -836,6 +937,128 @@ mod tests {
             !rows[1].incomplete,
             "ROG (absent from the map) defaults to not incomplete"
         );
+    }
+
+    #[test]
+    fn ud_threshold_reads_a_decimal_or_a_whole_fraction_strictly_positive() {
+        let dec = |s: &str| Decimal::from_str_exact(s).unwrap();
+        assert_eq!(parse_ud_threshold("3"), Some(dec("3")));
+        assert_eq!(parse_ud_threshold("0.33"), Some(dec("0.33")));
+        assert_eq!(
+            parse_ud_threshold("1/3"),
+            Decimal::ONE.checked_div(Decimal::from(3u8))
+        );
+        assert_eq!(parse_ud_threshold(" 2 / 4 "), Some(dec("0.5")));
+        for refused in [
+            "", "0", "-1", "0/3", "1/0", "1/", "/3", "1,5/3", "1.5/3", "a", "1/3/4", "-1/3",
+        ] {
+            assert_eq!(
+                parse_ud_threshold(refused),
+                None,
+                "{refused:?} must be refused"
+            );
+        }
+        let defaults = UdThresholds::default();
+        assert_eq!(defaults.high, dec("3"));
+        assert!(defaults.low < defaults.high);
+    }
+
+    #[test]
+    fn ud_mood_classifies_on_exact_edges() {
+        let dec = |s: &str| Decimal::from_str_exact(s).unwrap();
+        let t = UdThresholds::default();
+        let mood = |r: &str| ud_mood(Some(UdRank::Ratio(dec(r))), t);
+        // ≥ high → 🙂, exactly 3 included.
+        assert_eq!(mood("3"), Some(UdMood::High));
+        assert_eq!(mood("3.0000"), Some(UdMood::High));
+        assert_eq!(mood("10.5"), Some(UdMood::High));
+        assert_eq!(mood("2.9999999999"), Some(UdMood::Middle));
+        assert_eq!(mood("1"), Some(UdMood::Middle));
+        // < low → 🙁; exactly one third is NOT below one third → 😐.
+        assert_eq!(mood("0.33"), Some(UdMood::Low));
+        assert_eq!(mood("0.3333333333"), Some(UdMood::Low));
+        assert_eq!(mood("0.34"), Some(UdMood::Middle));
+        // A ratio of exactly one third, built the way the core builds it — `(high − price) /
+        // (price − low)` with `checked_div` — lands ON the « 1/3 » threshold, whatever the terms.
+        for (up, down) in [
+            ("1", "3"),
+            ("2", "6"),
+            ("10.5", "31.5"),
+            ("33.3", "99.9"),
+            ("7", "21"),
+        ] {
+            let r = dec(up).checked_div(dec(down)).unwrap();
+            assert_eq!(
+                ud_mood(Some(UdRank::Ratio(r)), t),
+                Some(UdMood::Middle),
+                "{up}/{down} is exactly one third → 😐"
+            );
+        }
+        // Undefined (price ≤ forecast low, « ∞ ») → 🙂; no value (« — ») → no emoticon.
+        assert_eq!(ud_mood(Some(UdRank::Unbounded), t), Some(UdMood::Unbounded));
+        assert_eq!(ud_mood(None, t), None);
+        // A user pair: « 0,5 » and « 2 ».
+        let custom = UdThresholds {
+            low: dec("0.5"),
+            high: dec("2"),
+        };
+        assert_eq!(
+            ud_mood(Some(UdRank::Ratio(dec("2"))), custom),
+            Some(UdMood::High)
+        );
+        assert_eq!(
+            ud_mood(Some(UdRank::Ratio(dec("0.5"))), custom),
+            Some(UdMood::Middle)
+        );
+        assert_eq!(
+            ud_mood(Some(UdRank::Ratio(dec("0.49"))), custom),
+            Some(UdMood::Low)
+        );
+    }
+
+    #[test]
+    fn ud_mood_follows_the_ud_column_withheld_unknown_and_undefined() {
+        // The emoticon is classified off the U/D column's own facts: a withheld verdict and an
+        // unknown ratio read « — » there and show no emoticon; an undefined ratio reads « ∞ » → 🙂.
+        let format = crate::viewmodel::format::NumberFormat::default();
+        let t = UdThresholds::default();
+        let ratio = UpsideDownside::Ratio(Decimal::from(5u8));
+        let mood = |ud: &UpsideDownside, incomplete| ud_mood(ud_facts(ud, incomplete, format).1, t);
+        assert_eq!(mood(&ratio, false), Some(UdMood::High));
+        assert_eq!(
+            mood(&UpsideDownside::Undefined, false),
+            Some(UdMood::Unbounded)
+        );
+        assert_eq!(mood(&UpsideDownside::Unknown, false), None);
+        for any in [ratio, UpsideDownside::Undefined, UpsideDownside::Unknown] {
+            assert_eq!(mood(&any, true), None, "withheld → no emoticon");
+        }
+    }
+
+    #[test]
+    fn the_row_carries_the_emoticon_key_and_greys_it_only_when_provisional() {
+        let study = sm(1, "NESN", "2026-01-10T00:00:00Z", "active");
+        let row = |ud_mood, provisional| {
+            to_row(
+                &study,
+                &StudyReturn {
+                    ud_mood,
+                    provisional,
+                    ..StudyReturn::default()
+                },
+            )
+        };
+        let r = row(Some(UdMood::High), false);
+        assert_eq!((r.ud_mood.as_str(), r.ud_mood_greyed), ("high", false));
+        let r = row(Some(UdMood::Unbounded), true);
+        assert_eq!((r.ud_mood.as_str(), r.ud_mood_greyed), ("unbounded", true));
+        let r = row(Some(UdMood::Middle), true);
+        assert_eq!((r.ud_mood.as_str(), r.ud_mood_greyed), ("middle", true));
+        let r = row(Some(UdMood::Low), false);
+        assert_eq!((r.ud_mood.as_str(), r.ud_mood_greyed), ("low", false));
+        // No emoticon: nothing to grey either.
+        let r = row(None, true);
+        assert_eq!((r.ud_mood.as_str(), r.ud_mood_greyed), ("", false));
     }
 
     #[test]

@@ -245,6 +245,23 @@ pub struct AppConfig {
     /// read through [`AppConfig::price_stale_after_or_default`] (validate before trust).
     #[serde(default)]
     pub price_stale_after_trading_days: Option<String>,
+    /// The study list's U/D emoticon thresholds (issue #294, Guy 2026-10-03): 🙂 at or above
+    /// `high`, 🙁 below `low`. Canonical spellings — a point decimal (« 0.33 ») or a whole
+    /// fraction (« 1/3 », [`crate::viewmodel::studies::parse_ud_threshold`]). `None` = the
+    /// pinned defaults 3 and 1/3. Append-only `#[serde(default)]`; read through
+    /// [`AppConfig::ud_threshold_spellings_or_default`] (validate before trust; a crossed pair falls back
+    /// whole — the size-table rule).
+    #[serde(default)]
+    pub ud_high_threshold: Option<String>,
+    #[serde(default)]
+    pub ud_low_threshold: Option<String>,
+}
+
+/// Whether `s` is a valid U/D emoticon threshold (issue #294): a strictly positive point decimal
+/// or a whole fraction « n/d ». The ONE validation shared by the config accessor and the Réglages
+/// handler.
+pub fn is_valid_ud_threshold(s: &str) -> bool {
+    crate::viewmodel::studies::parse_ud_threshold(s).is_some()
 }
 
 /// Whether `s` is a valid price age horizon: a whole number of trading days in `1..=260` (FR23).
@@ -316,6 +333,8 @@ impl Default for AppConfig {
             fx_fallback_provider: None,
             last_opened_path: None,
             price_stale_after_trading_days: None,
+            ud_high_threshold: None,
+            ud_low_threshold: None,
         }
     }
 }
@@ -400,6 +419,27 @@ impl AppConfig {
         steadyinvest_report::price_age::horizon_or_default(
             self.price_stale_after_trading_days.as_deref(),
         )
+    }
+
+    /// The study list's U/D emoticon thresholds (issue #294) as `(high, low)` canonical spellings:
+    /// each resolves independently to its persisted value when valid, else its default (3, 1/3);
+    /// the EFFECTIVE pair must then be ordered (`low < high`), else both defaults (the
+    /// [`Self::size_bounds_or_default`] rule — never one real and one default threshold crossed).
+    pub fn ud_threshold_spellings_or_default(&self) -> (String, String) {
+        use crate::viewmodel::studies::{DEFAULT_UD_HIGH, DEFAULT_UD_LOW, UdThresholds};
+        let one = |v: &Option<String>, default: &str| {
+            v.as_deref()
+                .map(str::trim)
+                .filter(|s| is_valid_ud_threshold(s))
+                .map(str::to_string)
+                .unwrap_or_else(|| default.to_string())
+        };
+        let high = one(&self.ud_high_threshold, DEFAULT_UD_HIGH);
+        let low = one(&self.ud_low_threshold, DEFAULT_UD_LOW);
+        match UdThresholds::from_spellings(&high, &low) {
+            Some(_) => (high, low),
+            None => (DEFAULT_UD_HIGH.to_string(), DEFAULT_UD_LOW.to_string()),
+        }
     }
 
     /// The concentration threshold in percent (Story 6.7, FR45): the persisted value when it is
@@ -662,6 +702,8 @@ mod tests {
             size_target_large_pct: Some("30".to_string()),
             last_opened_path: Some(PathBuf::from("/tmp/steadyinvest/journal.db")),
             price_stale_after_trading_days: Some("3".to_string()),
+            ud_high_threshold: Some("2.5".to_string()),
+            ud_low_threshold: Some("1/4".to_string()),
         };
         save(&path, &config).unwrap();
         let loaded = load(&path);
@@ -1107,6 +1149,63 @@ mod tests {
         c.price_stale_after_trading_days = Some("2".to_string());
         let back: AppConfig = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
         assert_eq!(back.price_stale_after_or_default(), 2);
+    }
+
+    #[test]
+    fn ud_thresholds_default_to_three_and_one_third_and_fall_back_whole_when_crossed() {
+        use crate::viewmodel::studies::UdThresholds;
+        let dec = |s: &str| rust_decimal::Decimal::from_str_exact(s).unwrap();
+        let pair = |high: &str, low: &str| (high.to_string(), low.to_string());
+        // Issue #294: absent from an older config → 3 and 1/3, no migration.
+        let older: AppConfig = serde_json::from_str(r#"{ "theme": "light" }"#).unwrap();
+        assert_eq!(
+            (&older.ud_high_threshold, &older.ud_low_threshold),
+            (&None, &None)
+        );
+        assert_eq!(older.ud_threshold_spellings_or_default(), pair("3", "1/3"));
+        let (high, low) = older.ud_threshold_spellings_or_default();
+        assert_eq!(
+            UdThresholds::from_spellings(&high, &low),
+            Some(UdThresholds::default())
+        );
+        // A valid pair is served as written (trimmed), decimal or fraction.
+        let mut c = AppConfig {
+            ud_high_threshold: Some(" 2.5 ".to_string()),
+            ud_low_threshold: Some("2/5".to_string()),
+            ..AppConfig::default()
+        };
+        assert_eq!(c.ud_threshold_spellings_or_default(), pair("2.5", "2/5"));
+        let (high, low) = c.ud_threshold_spellings_or_default();
+        assert_eq!(
+            UdThresholds::from_spellings(&high, &low),
+            Some(UdThresholds {
+                low: dec("0.4"),
+                high: dec("2.5")
+            })
+        );
+        // One side set, the other default: served when the effective pair is ordered…
+        c.ud_high_threshold = None;
+        c.ud_low_threshold = Some("0.5".to_string());
+        assert_eq!(c.ud_threshold_spellings_or_default(), pair("3", "0.5"));
+        // …and a crossed or equal effective pair falls back whole.
+        c.ud_low_threshold = Some("4".to_string());
+        assert_eq!(c.ud_threshold_spellings_or_default(), pair("3", "1/3"));
+        c.ud_low_threshold = Some("3".to_string());
+        assert_eq!(c.ud_threshold_spellings_or_default(), pair("3", "1/3"));
+        // A damaged value resolves to ITS default alone.
+        c.ud_high_threshold = Some("trois".to_string());
+        c.ud_low_threshold = Some("0.25".to_string());
+        assert_eq!(c.ud_threshold_spellings_or_default(), pair("3", "0.25"));
+        assert!(is_valid_ud_threshold("1/3"));
+        assert!(!is_valid_ud_threshold("0"));
+        assert!(
+            !is_valid_ud_threshold("0,33"),
+            "canonical is the point spelling"
+        );
+        // Round-trips through the file as written.
+        c.ud_high_threshold = Some("4".to_string());
+        let back: AppConfig = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        assert_eq!(back.ud_threshold_spellings_or_default(), pair("4", "0.25"));
     }
 
     #[test]

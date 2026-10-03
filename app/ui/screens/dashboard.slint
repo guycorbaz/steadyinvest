@@ -8,7 +8,7 @@
 // Every colour/size reads `Tokens`; every user-visible string is French inside `@tr()`.
 
 import { Tokens } from "../tokens.slint";
-import { Comparison, Dialog, Holdings, Labels, Studies, StudyRow, Confront, Drafts } from "../state.slint";
+import { Comparison, Dialog, Holdings, Labels, Prefs, Studies, StudyRow, Confront, Drafts } from "../state.slint";
 import { TextField } from "../components/text_field.slint";
 import { ActionButton } from "../components/action_button.slint";
 import { ChoiceChip } from "../components/choice_chip.slint";
@@ -33,6 +33,15 @@ component StudyListRow inherits Rectangle {
     callback export-study();
     callback export-study-pdf();
     callback confront-study();
+
+    // Issue #294: the emoticon's words — its tooltip and its accessible label. The thresholds are
+    // the effective Réglages values, spelled in the number format (« 1/3 » as a fraction).
+    property <string> mood-text: root.entry.ud-mood == "high" ? @tr("U/D ≥ {} (seuil haut)", Prefs.ud-high-threshold)
+        : root.entry.ud-mood == "unbounded" ? @tr("U/D indéfini (∞) : cours au prix bas prévu ou en dessous")
+        : root.entry.ud-mood == "middle" ? @tr("U/D entre {} et {} (seuils bas et haut)", Prefs.ud-low-threshold, Prefs.ud-high-threshold)
+        : root.entry.ud-mood == "low" ? @tr("U/D < {} (seuil bas)", Prefs.ud-low-threshold)
+        : "";
+    property <string> mood-tip: root.entry.ud-mood-greyed ? @tr("{} — verdict provisoire, émoticône grisée", root.mood-text) : root.mood-text;
 
     accessible-role: button;
     accessible-label: root.entry.ticker;
@@ -78,6 +87,39 @@ component StudyListRow inherits Rectangle {
             HorizontalLayout {
                 spacing: Tokens.space-8;
                 alignment: start;
+                // Issue #294 (Guy, 2026-10-03): the U/D emoticon beside the ticker — 🙂 at or above
+                // the high threshold or an undefined ratio (« ∞ »), 😐 between, 🙁 below the low
+                // threshold; nothing where the U/D column reads « — ». Greyed (reduced opacity) when
+                // the verdict is provisional. A fixed slot ALWAYS reserved, so the tickers stay
+                // aligned whether a row has an emoticon or not. Screen only — never in a PDF.
+                mood-slot := Rectangle {
+                    width: 22px;
+                    background: transparent;
+                    Text {
+                        text: root.entry.ud-mood == "high" || root.entry.ud-mood == "unbounded" ? "🙂"
+                            : root.entry.ud-mood == "middle" ? "😐"
+                            : root.entry.ud-mood == "low" ? "🙁"
+                            : "";
+                        // A renderer that draws the face from a monochrome font uses this ink (a
+                        // colour emoji ignores it); the provisional greying is the opacity.
+                        color: Tokens.text-high;
+                        font-size: Tokens.font-body;
+                        opacity: root.entry.ud-mood-greyed ? 0.4 : 1.0;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        width: 100%;
+                        accessible-role: text;
+                        accessible-label: root.mood-text;
+                    }
+                    // The tooltip's hover (no Slint tooltip widget): a click still opens the row.
+                    mood-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            fs.focus();
+                            root.open();
+                        }
+                    }
+                }
                 Text {
                     text: root.entry.ticker;
                     color: Tokens.text-high;
@@ -239,6 +281,25 @@ component StudyListRow inherits Rectangle {
         ActionButton {
             label: @tr("Supprimer");
             clicked => { root.delete-study(); }
+        }
+    }
+
+    // Issue #294: the emoticon's tooltip, drawn over the row's own identity column (declared last,
+    // so it sits above the ticker and the name) while the pointer rests on the emoticon.
+    if mood-touch.has-hover && root.mood-tip != "": Rectangle {
+        x: Tokens.space-12 + mood-slot.width + Tokens.space-4;
+        y: (root.height - self.height) / 2;
+        width: tip.preferred-width + 2 * Tokens.space-8;
+        height: tip.preferred-height + 2 * Tokens.space-4;
+        background: Tokens.surface-alt;
+        border-width: Tokens.border;
+        border-color: Tokens.separator;
+        border-radius: Tokens.radius;
+        tip := Text {
+            text: root.mood-tip;
+            color: Tokens.text-high;
+            font-size: Tokens.font-caption;
+            vertical-alignment: center;
         }
     }
 }

@@ -607,6 +607,66 @@ export component SettingsScreen inherits Rectangle {
                 }
             }
 
+            // Issue #294 (Guy, 2026-10-03) — the study list's U/D emoticon thresholds: a pair
+            // committed whole (low < high, refused by name otherwise). Each field: a decimal in
+            // the number format or a whole fraction « 1/3 »; blank = the default (3, 1/3).
+            ud-panel := PanelCard {
+                title: @tr("Émoticône U/D de la liste des études");
+                property <string> draft-high: Prefs.ud-high-threshold;
+                property <string> draft-low: Prefs.ud-low-threshold;
+                property <int> epoch: Prefs.number-settings-epoch;
+                changed epoch => {
+                    ud-panel.draft-high = Prefs.ud-high-threshold;
+                    ud-panel.draft-low = Prefs.ud-low-threshold;
+                }
+
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: Tokens.space-8;
+
+                    Text {
+                        text: @tr("Seuil haut");
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        vertical-alignment: center;
+                    }
+                    TextField {
+                        placeholder: @tr("U/D (vide = 3)");
+                        text <=> ud-panel.draft-high;
+                        width: 160px;
+                    }
+                    Text {
+                        text: @tr("Seuil bas");
+                        color: Tokens.text-mid;
+                        font-size: Tokens.font-caption;
+                        vertical-alignment: center;
+                    }
+                    TextField {
+                        placeholder: @tr("U/D (vide = 1/3)");
+                        text <=> ud-panel.draft-low;
+                        width: 160px;
+                    }
+                    ActionButton {
+                        label: @tr("Enregistrer");
+                        enabled: true;
+                        // Issue #88: re-sync both fields to the effective values after a WRITTEN
+                        // save; a refusal keeps the typed text (G1 review, AC1).
+                        clicked => {
+                            if (Prefs.ud-thresholds-changed(ud-panel.draft-high, ud-panel.draft-low)) {
+                                ud-panel.draft-high = Prefs.ud-high-threshold;
+                                ud-panel.draft-low = Prefs.ud-low-threshold;
+                            }
+                        }
+                    }
+                }
+                Text {
+                    text: @tr("Dans la liste des études, à côté du symbole : 🙂 si le ratio U/D atteint le seuil haut ou s'il est indéfini (cours au prix bas prévu ou en dessous), 🙁 s'il est sous le seuil bas, 😐 entre les deux ; grisée quand le verdict est provisoire, absente quand la colonne U/D affiche « — ». Un seuil s'écrit en nombre décimal, au format des nombres choisi, ou en fraction de deux nombres entiers (p. ex. 1/3). À l'écran seulement, jamais dans les PDF.");
+                    color: Tokens.text-low;
+                    font-size: Tokens.font-caption;
+                    wrap: word-wrap;
+                }
+            }
+
             // Story 6.7 (FR45) — the concentration threshold + the configurable diversify-by-size
             // table (change-request): boundaries are compared against study sales CONVERTED to
             // the reference currency, in the same unit as entered in studies; targets are the

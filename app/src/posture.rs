@@ -189,6 +189,11 @@ mod tests {
         // study_screen (8.1): the invisible probe measuring three lines of note text (the
         // extractor drops the `\n` escapes); digits only, never shown
         "0n0n0",
+        // dashboard (issue #294): the study list's U/D emoticons — at or above the high
+        // threshold or undefined, between the thresholds, below the low threshold
+        "🙂",
+        "😐",
+        "🙁",
         // single-space and punctuation-only separators (no prose, no verb)
         " ",
         " · ",
@@ -815,8 +820,11 @@ mod tests {
         // horizon's +4 on main's real 1178: 1178 − 6 + 4 = 1176, measured.
         // « Tri : U/D » (Guy, 2026-10-01; PR #292): the dashboard's fifth sort chip: 1176 + 1 =
         // 1177, measured after PR #292 was brought up to date with main (PR #289, #290, #291, #293).
+        // U/D emoticon (issue #294, Guy 2026-10-03): the list row's four tooltip lines and the
+        // provisional suffix (5); the Réglages card — title, « Seuil haut », « Seuil bas », two
+        // placeholders, « Enregistrer », explanation (7): 1177 + 12 = 1189, measured.
         assert!(
-            total >= 1177,
+            total >= 1189,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -1092,7 +1100,10 @@ mod tests {
             // FR23 age horizon (owner decision 2026-10-01, PR #293): the Réglages refusal of an
             // invalid horizon (MSG_PRICE_STALE_AFTER_INVALID): merged with PR #291 on main,
             // 262 + 1 = 263, measured.
-            263,
+            // U/D emoticon thresholds (issue #294, Guy 2026-10-03): the Réglages refusals
+            // (MSG_UD_HIGH_INVALID, MSG_UD_LOW_INVALID, MSG_UD_PAIR_CROSSED): 263 + 3 = 266,
+            // measured.
+            266,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured. The G1 final review of the study PDF export

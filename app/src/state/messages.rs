@@ -660,6 +660,15 @@ pub const MSG_SIZE_FIELD_INVALID: &str = "« {field} » n'est pas valide ; rien 
 /// medium one; nothing is written.
 pub const MSG_SIZE_PAIR_CROSSED: &str =
     "La borne « petite » doit rester inférieure à la borne « moyenne » ; rien n'a été enregistré.";
+/// Issue #294 (Guy, 2026-10-03): the study list's U/D emoticon thresholds — each refusal names
+/// its field and the accepted spellings; the pair commits whole or not at all, the setting is
+/// unchanged. Fact-stating (posture).
+pub const MSG_UD_HIGH_INVALID: &str = "Le seuil haut U/D doit être un nombre décimal strictement positif ou une fraction de deux nombres entiers (p. ex. 1/3) ; le réglage n'a pas changé.";
+pub const MSG_UD_LOW_INVALID: &str = "Le seuil bas U/D doit être un nombre décimal strictement positif ou une fraction de deux nombres entiers (p. ex. 1/3) ; le réglage n'a pas changé.";
+/// Issue #294: the low U/D threshold must stay strictly below the high one (compared on the
+/// effective values, a blank field standing for its default).
+pub const MSG_UD_PAIR_CROSSED: &str =
+    "Le seuil bas U/D doit rester inférieur au seuil haut ; le réglage n'a pas changé.";
 
 /// Fallback-chain copy (Story 6.9, FR26) — fact-stating, posture-gated. Set when a fetch was
 /// served by a NON-PRIMARY chain member: a fallback is a visible event, never a silence. `{p}`
@@ -1521,6 +1530,9 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_SIZE_FIELD_INVALID,
     MSG_SIZE_FIELD_AMBIGUOUS,
     MSG_SIZE_PAIR_CROSSED,
+    MSG_UD_HIGH_INVALID,
+    MSG_UD_LOW_INVALID,
+    MSG_UD_PAIR_CROSSED,
     MSG_PROVIDER_FALLBACK,
     MSG_FALLBACK_NO_KEY,
     MSG_PORTFOLIO_INVALID_NAME,
