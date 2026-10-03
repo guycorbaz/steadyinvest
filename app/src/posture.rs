@@ -804,7 +804,8 @@ mod tests {
         // = 1173, measured.
         // FR23 age horizon (owner decision 2026-10-01): the Réglages panel « Cours périmé après
         // (jours de bourse) » — title, placeholder, « Enregistrer », explanation (4). Measured
-        // 1182: main already scanned 1178 (the floor had lagged by 5), + 4.
+        // 1182: main already scanned 1178 (the floor had lagged by 5), + 4. Merged with PR #291 on
+        // main (no @tr change there): 1182, measured.
         assert!(
             total >= 1182,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
@@ -1022,10 +1023,16 @@ mod tests {
             // examination's wording and a listing in hundredths (MSG_CURRENCY_CHOSEN_MISMATCH,
             // MSG_CURRENCY_SUBUNIT): 258 + 2 = 260, measured.
             // G3 catch-up of #267–#270: a year with only divergences left (MSG_YEAR_ONLY_LEFT):
-            // 260 + 1 = 261, measured. FR23 age horizon (owner decision 2026-10-01): the Réglages
-            // refusal of an invalid horizon (MSG_PRICE_STALE_AFTER_INVALID): 261 + 1 = 262,
-            // measured.
-            262,
+            // 260 + 1 = 261, measured.
+            // Owner decision 2026-10-01: a listing in hundredths is converted at the fetch, no
+            // longer refused (MSG_CURRENCY_SUBUNIT removed): 261 − 1 = 260, measured. Its PR #291
+            // review: a holdings price of unknown unit on a hundredths venue is refused
+            // (MSG_HOLDINGS_UNIT_UNKNOWN), a study kept in the hundredths code is told the major
+            // currency (MSG_CURRENCY_SUBUNIT_EXPECTED): 260 + 2 = 262, measured.
+            // FR23 age horizon (owner decision 2026-10-01, PR #293): the Réglages refusal of an
+            // invalid horizon (MSG_PRICE_STALE_AFTER_INVALID): merged with PR #291 on main,
+            // 262 + 1 = 263, measured.
+            263,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured. The G1 final review of the study PDF export
@@ -1104,8 +1111,13 @@ mod tests {
             // parts) and a judgment placed by a validated AI proposal: 25 + 9 = 34. Its G3 review:
             // the stale and calculated cells counted apart: 34 + 2 = 36.
             // FR7 (2026-10-01): « aucun » of the study's quality-flags line: 36 + 1 = 37.
-            // FR23 owner decision C (2026-10-03): a current price with no recorded origin is
-            // « date inconnue » (GATE_UNKNOWN_DATE): 37 + 1 = 38, measured.
+            // Owner decision 2026-10-01: the traceability line of a listing converted from
+            // hundredths (TRACE_LISTING_SUBUNIT): 37 + 1 = 38, measured. Its PR #291 review: the
+            // line is defined once in the report (LISTING_SUBUNIT_LINE, scanned with the report's
+            // strings — the study PDF and the quick screen print it too): 38 − 1 = 37, measured.
+            // FR23 owner decision C (2026-10-03, PR #293): a current price with no recorded origin
+            // is « date inconnue » (GATE_UNKNOWN_DATE): merged with PR #291 on main, 37 + 1 = 38,
+            // measured.
             38,
             "engine.rs label inventory changed — register the new label"
         );
