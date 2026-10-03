@@ -449,6 +449,13 @@ impl JournalState {
         self.clock.day_zone()
     }
 
+    /// Today's day (`AAAA-MM-JJ`) in [`Self::day_zone`] — the date the comparison, the quick
+    /// screen and the review print (owner decision, Guy 2026-10-03: every shown date is local).
+    pub fn today_shown(&self) -> String {
+        use steadyinvest_report::price_age::Day;
+        self.day_zone().shown(&self.now(), Day::iso)
+    }
+
     /// The user's number format (G1 I): the rails' reading of typed amounts, and the spelling of
     /// the figures the wiring bakes from this state.
     pub fn number_format(&self) -> NumberFormat {
@@ -529,11 +536,12 @@ impl JournalState {
     }
 }
 
-/// A neutral RFC3339 timestamp rendered for the dashboard list: the date portion only (the time of
-/// day is not meaningful in the v1 list). A non-RFC3339 string passes through unchanged — this is a
-/// display transform, it never repairs a value.
-pub fn created_at_date(ts: &Timestamp) -> String {
-    ts.0.split('T').next().unwrap_or(&ts.0).to_string()
+/// A neutral RFC3339 timestamp rendered for the dashboard list and the study header: its day
+/// (`AAAA-MM-JJ`) in `zone`, the owner's local time (owner decision, Guy 2026-10-03 — a study
+/// created at 00:30 in Zurich is that day's); the time of day is not meaningful there. A
+/// non-RFC3339 string passes through unchanged — a display transform, it never repairs a value.
+pub fn created_at_date(ts: &Timestamp, zone: steadyinvest_report::price_age::DayZone) -> String {
+    zone.shown(ts, steadyinvest_report::price_age::Day::iso)
 }
 
 /// A failed READ on a write rail (G1 P): named as a read failure — never « L'enregistrement a

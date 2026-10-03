@@ -277,6 +277,13 @@ fn cell(c: &ComparisonColumn, n: usize, zones: ZoneNouns) -> String {
             .unwrap_or(EM_DASH)
             .to_string(),
         28 => state_label(c),
+        // Row 21, the U/D ratio: the app's « ∞ » has no WinAnsi glyph — printed in words.
+        21 => c
+            .rows
+            .get(20)
+            .filter(|s| !s.is_empty())
+            .map(|s| crate::pdf::printable_ud(s))
+            .unwrap_or_else(|| EM_DASH.to_string()),
         _ => c
             .rows
             .get(n - 1)
@@ -521,6 +528,17 @@ mod tests {
         let mut t = column("T", false);
         t.rows[4] = "47,6 % · ↑ hausse".into();
         assert_eq!(cell(&t, 5, ZoneNouns::NEUTRAL), "47,6 % · hausse");
+        // Row 21 (owner decision, Guy 2026-10-03): the screen's « ∞ » has no WinAnsi glyph — the
+        // PDF says it in words; a stated ratio and the absence print as before.
+        t.rows[20] = crate::UD_UNBOUNDED.into();
+        assert_eq!(
+            cell(&t, 21, ZoneNouns::NEUTRAL),
+            crate::pdf::UD_UNBOUNDED_PDF
+        );
+        t.rows[20] = "3,4:1".into();
+        assert_eq!(cell(&t, 21, ZoneNouns::NEUTRAL), "3,4:1");
+        t.rows[20] = String::new();
+        assert_eq!(cell(&t, 21, ZoneNouns::NEUTRAL), EM_DASH);
     }
 
     #[test]

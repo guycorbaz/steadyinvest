@@ -75,11 +75,25 @@ impl Day {
 
     /// `JJ/MM/AAAA` — the day as the traceability and the study PDF print it.
     pub fn jj_mm_aaaa(self) -> String {
+        self.formatted("%d/%m/%Y")
+    }
+
+    /// `JJ/MM` — the day without its year (the frozen verdict's and the provenance's short date).
+    pub fn jj_mm(self) -> String {
+        self.formatted("%d/%m")
+    }
+
+    /// `AAAA-MM-JJ` — the day in ISO form (the study list, the comparison's column dates).
+    pub fn iso(self) -> String {
+        self.formatted("%Y-%m-%d")
+    }
+
+    fn formatted(self, pattern: &str) -> String {
         // 719 163 = days from 0001-01-01 (CE day 1) to 1970-01-01.
         i32::try_from(self.0 + 719_163)
             .ok()
             .and_then(chrono::NaiveDate::from_num_days_from_ce_opt)
-            .map(|d| d.format("%d/%m/%Y").to_string())
+            .map(|d| d.format(pattern).to_string())
             .unwrap_or_default()
     }
 
@@ -130,6 +144,27 @@ impl DayZone {
     /// Today, from the injected clock's `now` — the same day reading as a price's.
     pub fn today(self, now: &Timestamp) -> Option<Day> {
         self.day_of(now)
+    }
+
+    /// The time of day (`HH:MM`) of an RFC 3339 stamp in this zone; `None` for a bare date or an
+    /// unreadable stamp.
+    pub fn hh_mm(self, t: &Timestamp) -> Option<String> {
+        let at = chrono::DateTime::parse_from_rfc3339(&t.0).ok()?;
+        Some(match self {
+            DayZone::Local => at.with_timezone(&chrono::Local).format("%H:%M").to_string(),
+            DayZone::FixedSecondsEast(secs) => at
+                .with_timezone(&chrono::FixedOffset::east_opt(secs)?)
+                .format("%H:%M")
+                .to_string(),
+        })
+    }
+
+    /// THE shown date of a stamp (owner decision, Guy 2026-10-03: every user-visible timestamp in
+    /// the owner's local time, read like the price's age): its day in this zone, written by
+    /// `as_shown` (`Day::jj_mm_aaaa`, `Day::jj_mm`, `Day::iso`); an unreadable stamp passes
+    /// through unchanged — a display transform, it never repairs a value.
+    pub fn shown(self, t: &Timestamp, as_shown: fn(Day) -> String) -> String {
+        self.day_of(t).map_or_else(|| t.0.clone(), as_shown)
     }
 }
 

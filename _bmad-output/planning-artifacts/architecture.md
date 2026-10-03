@@ -654,7 +654,25 @@ decimal values stored as `TEXT` decimal strings** (NOT `REAL` — preserves `rus
   (§Phase 4, A5; D9 withdrawn 2026-09-27).
 - **Versions:** `schema_version` = integer; `method_version` = string (semver-like).
 - **Decimal in JSON:** serialized as a **string** (exact), parsed to `rust_decimal::Decimal`.
-- **Dates/times:** RFC3339 UTC strings everywhere (storage, export, logs).
+- **Dates/times:** RFC3339 UTC strings everywhere (storage, export, logs). **Shown** in the owner's
+  local time (réconcilié 2026-10-03 : décision Guy) — every user-visible date or time of an instant
+  reads its stamp through ONE function, `report::price_age::DayZone::shown` (+ `hh_mm`), in the zone
+  of the app `Clock` (`Local` in the app, UTC in `FixedClock` tests; the PDFs default to UTC so a
+  render is deterministic, the app passing its zone): the traceability (« dernière mise à jour
+  le … », « validé le … »), the frozen verdict (strip, « Étude validée ; verdict figé le … », the
+  confrontation's « Verdict figé le … », the study PDF), the provenance caption, the history's day
+  headers and times, the study list / header / comparison dates, the review's last-save day and
+  date, the comparison / quick-screen / review « today », a sold position's day and the holdings
+  freshness caption; notes, drafts and AI lines already were local. Calendar dates typed by the
+  owner (transactions, dividends, FX rates — stored at midnight UTC) and provider session dates
+  are dates, never re-zoned; backup file names keep their UTC stamp (`…T081500Z`).
+- **U/D display (réconcilié 2026-10-03 : décision Guy):** an undefined ratio (current price ≤
+  forecast low, `UpsideDownside::Undefined`) is unbounded — the most favourable case — and every
+  screen shows « ∞ » from ONE constant (`report::UD_UNBOUNDED`) through ONE formatter
+  (`engine::fmt_ud`: study, scenarios, comparison, review, frozen verdict, study list, replacement
+  candidates); `Unknown` stays « — ». The PDFs print « illimité » (`report::pdf::UD_UNBOUNDED_PDF`):
+  their standard-14 Helvetica is WinAnsi-encoded, which has no « ∞ » glyph. The MCP keeps its
+  machine code (`computed.upside_downside: null`, `ud_state: "undefined"`).
 - **Enums:** `#[serde(rename_all = "snake_case")]`, internally tagged where a discriminant is needed
   (cell `source`: `provider|manual|derived`; `review`: `none|to_review|validated`).
 - **Booleans** as JSON booleans; tri-state review is an enum, never `0/1/2`.
