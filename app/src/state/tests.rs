@@ -10965,7 +10965,7 @@ mod price_origin {
 
     fn verdict_open(state: &JournalState, id: Uuid) -> Option<String> {
         let study = state.get_study(id).unwrap();
-        engine::open_inputs(&engine::build_snapshot(&study).unwrap())
+        engine::open_inputs(&engine::build_snapshot(&study).unwrap(), &study)
     }
 
     #[test]
@@ -10985,6 +10985,7 @@ mod price_origin {
                 at: Timestamp(NOW.to_string()),
                 session_date: Some("2026-09-30".to_string()),
                 freshness: Freshness::Current,
+                aged: false,
             })
         );
         // The holdings price refresh does the same, without a session date when none is given.
@@ -11161,6 +11162,194 @@ mod price_origin {
             .unwrap();
         state.mark_provider_stale(id).unwrap();
         assert_eq!(origin(&state, id).unwrap().freshness, Freshness::Current);
+    }
+
+    /// Move the price's origin back to `at` (and its session date to `session`).
+    fn dated(state: &mut JournalState, id: Uuid, at: &str, session: Option<&str>) {
+        let at = Timestamp(at.to_string());
+        let session = session.map(str::to_string);
+        state
+            .mutate_study(id, move |s| {
+                let o = s.judgment.current_price_origin.as_mut().unwrap();
+                o.at = at;
+                o.session_date = session;
+            })
+            .unwrap();
+    }
+
+    // FR23 age horizon (owner decision 2026-10-01): past N trading days a price is « périmé » on
+    // every read — the verdict provisional — without any flag written; a wider horizon un-ages it.
+    #[test]
+    fn a_price_past_the_age_horizon_is_stale_on_read_and_nothing_is_persisted() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0xA1, NOW); // NOW: Thursday 2026-10-01
+        let id = state.create_study("NESN", "CHF").unwrap();
+        state
+            .apply_provider_refresh(id, &fetched_with_price(&YEARS, 60))
+            .unwrap();
+        ready(&mut state, id);
+        // Wednesday's close on Thursday: one trading day old — current.
+        dated(&mut state, id, "2026-09-30T20:00:00Z", Some("2026-09-30"));
+        assert_eq!(verdict_open(&state, id), None, "within the horizon: Full");
+        // Tuesday's close (fetched on Wednesday): the session date counts — two trading days.
+        dated(&mut state, id, "2026-09-30T08:00:00Z", Some("2026-09-29"));
+        let o = origin(&state, id).unwrap();
+        assert!(o.aged && o.is_stale(), "{o:?}");
+        assert_eq!(o.freshness, Freshness::Current, "no flag written");
+        let open = verdict_open(&state, id).expect("no longer Full");
+        assert!(open.contains("Prix actuel — périmé"), "{open}");
+        // The dossier holds no age: the export carries no trace of it.
+        let exported = state.export_study(id).unwrap();
+        assert!(!exported.contains("aged"), "{exported}");
+        // The owner widens the horizon: the next read is Full again.
+        state.set_price_stale_after(2);
+        assert!(!origin(&state, id).unwrap().aged);
+        assert_eq!(verdict_open(&state, id), None, "a wider horizon: Full");
+        // A typed price ages too, from the day it was typed.
+        state.set_price_stale_after(1);
+        state
+            .set_judgment_field(id, "current_price", Some(und_money(58)))
+            .unwrap();
+        assert_eq!(verdict_open(&state, id), None, "typed today: Full");
+        dated(&mut state, id, "2026-09-26T10:00:00Z", None); // a Saturday: Mon–Thu = 4 days
+        assert!(origin(&state, id).unwrap().aged);
+        state.set_price_stale_after(4);
+        assert!(!origin(&state, id).unwrap().aged);
+    }
+
+    // Review of PR #293: the same value retyped on a LATER day than the price's day confirms it —
+    // the price is fresh again; the same day stays a no-op (no undo step).
+    #[test]
+    fn retyping_the_same_price_on_a_later_day_makes_it_fresh_again() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0xA2, NOW); // NOW: Thursday 2026-10-01
+        let id = state.create_study("NESN", "CHF").unwrap();
+        state
+            .apply_provider_refresh(id, &fetched_with_price(&YEARS, 60))
+            .unwrap();
+        ready(&mut state, id);
+        state
+            .set_judgment_field(id, "current_price", Some(und_money(58)))
+            .unwrap();
+        // Typed on Tuesday: two trading days old on Thursday.
+        dated(&mut state, id, "2026-09-29T10:00:00Z", None);
+        assert!(origin(&state, id).unwrap().aged);
+        assert!(verdict_open(&state, id).is_some(), "aged: not Full");
+        let depth = state.undo_depth();
+        state
+            .set_judgment_field(id, "current_price", Some(und_money(58)))
+            .unwrap();
+        let o = origin(&state, id).unwrap();
+        assert_eq!(
+            (o.source, o.at.0.as_str(), o.aged),
+            (Source::Manual, NOW, false)
+        );
+        assert_eq!(verdict_open(&state, id), None, "confirmed today: Full");
+        assert_eq!(state.undo_depth(), depth + 1, "a real write, undoable");
+        // Again the same day: a no-op.
+        state
+            .set_judgment_field(id, "current_price", Some(und_money(58)))
+            .unwrap();
+        assert_eq!(state.undo_depth(), depth + 1, "same day, same value: no-op");
+        // A fetched quote retyped the same day keeps its provider origin.
+        state
+            .apply_holding_price(id, rust_decimal::Decimal::new(61, 0), None)
+            .unwrap();
+        let depth = state.undo_depth();
+        state
+            .set_judgment_field(id, "current_price", Some(und_money(61)))
+            .unwrap();
+        assert_eq!(origin(&state, id).unwrap().source, Source::Provider);
+        assert_eq!(state.undo_depth(), depth);
+    }
+
+    // Review of PR #293: a fetch bringing the same quote WITHOUT a session date on a later day
+    // renews its fetch date (its age); the same day — or the same session — stays a no-op.
+    #[test]
+    fn the_same_quote_fetched_on_a_later_day_without_a_session_is_fresh_again() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0xA3, NOW); // NOW: Thursday 2026-10-01
+        let id = state.create_study("NESN", "CHF").unwrap();
+        let price = rust_decimal::Decimal::new(60, 0);
+        state.apply_holding_price(id, price, None).unwrap();
+        dated(&mut state, id, "2026-09-29T10:00:00Z", None);
+        assert!(origin(&state, id).unwrap().aged);
+        let depth = state.undo_depth();
+        state.apply_holding_price(id, price, None).unwrap();
+        let o = origin(&state, id).unwrap();
+        assert_eq!((o.at.0.as_str(), o.aged), (NOW, false));
+        assert_eq!(state.undo_depth(), depth + 1, "a real write");
+        state.apply_holding_price(id, price, None).unwrap();
+        assert_eq!(state.undo_depth(), depth + 1, "same day, same quote: no-op");
+        // The same quote for the same OLD session (an exchange holiday, no new close): the session
+        // date is its age — nothing to renew, it stays « périmé ».
+        dated(&mut state, id, "2026-09-29T10:00:00Z", Some("2026-09-29"));
+        let depth = state.undo_depth();
+        state
+            .apply_holding_price(id, price, Some("2026-09-29".to_string()))
+            .unwrap();
+        let o = origin(&state, id).unwrap();
+        assert_eq!(o.at.0, "2026-09-29T10:00:00Z", "untouched");
+        assert!(o.aged);
+        assert_eq!(state.undo_depth(), depth);
+    }
+
+    /// Drop the price's origin — a price written before origins were recorded.
+    fn unrecorded(state: &mut JournalState, id: Uuid) {
+        state
+            .mutate_study(id, |s| s.judgment.current_price_origin = None)
+            .unwrap();
+    }
+
+    // Owner decision C (Guy 2026-10-03): a price with no recorded origin has an unknown date — the
+    // verdict is provisional, its open gate « Prix actuel — date inconnue » (not « périmé »).
+    // Retyping the same value, or fetching the same quote, records an origin: fresh again.
+    #[test]
+    fn a_price_without_origin_is_of_unknown_date_until_written_again() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0xA4, NOW);
+        let id = state.create_study("NESN", "CHF").unwrap();
+        state
+            .apply_provider_refresh(id, &fetched_with_price(&YEARS, 60))
+            .unwrap();
+        ready(&mut state, id);
+        assert_eq!(verdict_open(&state, id), None, "recorded today: Full");
+        unrecorded(&mut state, id);
+        assert_eq!(origin(&state, id), None, "no mark invented on read");
+        let open = verdict_open(&state, id).expect("no longer Full");
+        assert!(open.contains("Prix actuel — date inconnue"), "{open}");
+        assert!(!open.contains("périmé"), "{open}");
+        // The same value retyped: a real write that records the owner's origin.
+        let depth = state.undo_depth();
+        state
+            .set_judgment_field(id, "current_price", Some(und_money(60)))
+            .unwrap();
+        let o = origin(&state, id).unwrap();
+        assert_eq!(
+            (o.source, o.at.0.as_str(), o.aged),
+            (Source::Manual, NOW, false)
+        );
+        assert_eq!(verdict_open(&state, id), None, "retyped: Full");
+        assert_eq!(state.undo_depth(), depth + 1, "a real write, undoable");
+        // The same quote fetched again (here for an old session): the origin is recorded too.
+        unrecorded(&mut state, id);
+        state
+            .apply_holding_price(
+                id,
+                rust_decimal::Decimal::new(60, 0),
+                Some("2026-09-30".to_string()),
+            )
+            .unwrap();
+        let o = origin(&state, id).unwrap();
+        assert_eq!(
+            (o.source, o.session_date.as_deref()),
+            (Source::Provider, Some("2026-09-30"))
+        );
+        assert_eq!(verdict_open(&state, id), None, "fetched: Full");
+        // No price at all: the missing-input path, never « date inconnue ».
+        state.set_judgment_field(id, "current_price", None).unwrap();
+        let open = verdict_open(&state, id).expect("no price: not Full");
+        assert!(open.contains("Prix actuel — manquant"), "{open}");
     }
 }
 

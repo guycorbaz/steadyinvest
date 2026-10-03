@@ -418,6 +418,11 @@ pub struct CallEnv<'a> {
     pub now: &'a dyn Fn() -> Timestamp,
     pub new_id: &'a dyn Fn() -> Uuid,
     pub cancelled: &'a dyn Fn() -> bool,
+    /// The current price's age horizon in trading days (FR23), from the app-config.
+    pub price_stale_after: u32,
+    /// The zone a stamp's day is read in for that age — the owner's local time (decision D,
+    /// 2026-10-03): `DayZone::Local` in the server.
+    pub day_zone: steadyinvest_report::price_age::DayZone,
 }
 
 fn error_body(r: &Rendered, dossier: Option<&DossierIdentity>, resolved: Option<&Path>) -> Value {
@@ -580,7 +585,7 @@ fn call_on(
                 (id, McpRead::Study(read)) => Ok(ok(
                     &id,
                     if tool == "get_study" {
-                        dto::study_read(&read)
+                        dto::study_read(&read, &(env.now)(), env.price_stale_after, env.day_zone)
                     } else {
                         dto::notes(&read)
                     },

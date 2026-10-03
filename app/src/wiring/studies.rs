@@ -633,8 +633,10 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
                 .map(|snap| {
                     crate::viewmodel::engine::quality_flags_line(snap.outputs(), &study.judgment)
                 });
+            // Owner decision D (2026-10-03): the price origin's date in the price age's zone.
             let extras = steadyinvest_report::StudyPdfExtras {
                 quality_flags: flags.as_deref(),
+                day_zone: journal_state.borrow().day_zone(),
             };
             let bytes = match steadyinvest_report::render_study_pdf_with(&study, numbers, &extras) {
                 Ok(bytes) => bytes,

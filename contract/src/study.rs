@@ -124,6 +124,21 @@ pub struct PriceOrigin {
     pub session_date: Option<String>,
     /// `Stale` after a failed refresh (FR23); a successful refresh or a typed price is `Current`.
     pub freshness: Freshness,
+    /// The FR23 **age horizon**, applied at read time (owner decision 2026-10-01): `true` when the
+    /// price is older than the configured number of trading days on the day it is read
+    /// (`report::price_age::apply_price_age`). **Never serialized** — the age depends on today and
+    /// on a setting the owner can change, so it is recomputed on every read and can never be
+    /// persisted into the dossier, an export or a backup (the wire format is unchanged).
+    #[serde(skip)]
+    pub aged: bool,
+}
+
+impl PriceOrigin {
+    /// Stale for the verdict and the traceability (FR23): flagged by a failed refresh, or older
+    /// than the age horizon on the read that produced this copy.
+    pub fn is_stale(&self) -> bool {
+        self.freshness == Freshness::Stale || self.aged
+    }
 }
 
 /// The "placed by AI" marks of a [`Judgment`] — exactly the nine draftable judgment fields

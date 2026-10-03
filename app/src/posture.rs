@@ -802,8 +802,12 @@ mod tests {
         // FR50 (project review 2026-10-01): the confrontation says where its band comes from — the
         // title's « actuelle » form and three basis lines replace « Décision du {} »: 1170 − 1 + 4
         // = 1173, measured.
+        // FR23 age horizon (owner decision 2026-10-01): the Réglages panel « Cours périmé après
+        // (jours de bourse) » — title, placeholder, « Enregistrer », explanation (4). Measured
+        // 1182: main already scanned 1178 (the floor had lagged by 5), + 4. Merged with PR #291 on
+        // main (no @tr change there): 1182, measured.
         assert!(
-            total >= 1173,
+            total >= 1182,
             "posture gate scanned only {total} @tr() literals — extraction broken?"
         );
     }
@@ -1025,7 +1029,10 @@ mod tests {
             // review: a holdings price of unknown unit on a hundredths venue is refused
             // (MSG_HOLDINGS_UNIT_UNKNOWN), a study kept in the hundredths code is told the major
             // currency (MSG_CURRENCY_SUBUNIT_EXPECTED): 260 + 2 = 262, measured.
-            262,
+            // FR23 age horizon (owner decision 2026-10-01, PR #293): the Réglages refusal of an
+            // invalid horizon (MSG_PRICE_STALE_AFTER_INVALID): merged with PR #291 on main,
+            // 262 + 1 = 263, measured.
+            263,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured. The G1 final review of the study PDF export
@@ -1108,7 +1115,11 @@ mod tests {
             // hundredths (TRACE_LISTING_SUBUNIT): 37 + 1 = 38, measured. Its PR #291 review: the
             // line is defined once in the report (LISTING_SUBUNIT_LINE, scanned with the report's
             // strings — the study PDF and the quick screen print it too): 38 − 1 = 37, measured.
-            37,
+            // FR23 owner decision C (2026-10-03, PR #293): a current price with no recorded origin
+            // is « date inconnue » (GATE_UNKNOWN_DATE): merged with PR #291 on main, 37 + 1 = 38,
+            // measured. An origin whose date cannot be read is « date inconnue » too, its source
+            // named (TRACE_PRICE_PROVIDER, « fournisseur »): 38 + 1 = 39, measured.
+            39,
             "engine.rs label inventory changed — register the new label"
         );
     }

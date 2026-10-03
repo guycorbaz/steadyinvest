@@ -111,6 +111,8 @@ fn main() -> Result<(), slint::PlatformError> {
     );
     // G1 I: the rails read typed amounts under the user's number format.
     journal_state.set_number_format(config.borrow().number_format);
+    // FR23 (owner decision 2026-10-01): the current price's age horizon, applied on every read.
+    journal_state.set_price_stale_after(config.borrow().price_stale_after_or_default());
     // Persist the resolved path so the same journal reopens next launch (only when it changed).
     // G3 M4: a configured dossier refused for a NAMED cause (locked, protected and too old…) stays
     // the configured one — the default dossier only stands in for this session.

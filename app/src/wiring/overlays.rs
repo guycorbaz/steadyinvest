@@ -184,11 +184,15 @@ pub(crate) fn wire_overlays(ui: &MainWindow, s: &Session) {
                 return;
             };
             let format = config.borrow().number_format;
+            // Owner decision D (2026-10-03): the price origin's date in the price age's zone.
+            let zone = journal_state.borrow().day_zone();
             // The single engine-call site (`state::snapshot_for`): re-read + normalize + one
             // `StudySnapshot::new`. A normalize failure surfaces neutrally, never `unwrap`.
             match journal_state.borrow().snapshot_for(id) {
                 Ok(snapshot) => {
-                    studies.set_trace(viewmodel::engine::verdict_trace(&study, &snapshot, format));
+                    studies.set_trace(viewmodel::engine::verdict_trace(
+                        &study, &snapshot, format, zone,
+                    ));
                 }
                 Err(message) => study_notice::fail(&ui, Source::Edit, &message),
             }

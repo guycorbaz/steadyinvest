@@ -77,8 +77,16 @@ editHistory:
     changes: "G2 round 3 (G3 review of PR #255, owner decisions D1–D10; D11 FR68 decision time = explicit « Valider l'étude » on a full verdict, differences highlighted, delivered in Story 8.8): draft study carries a proposed currency and optional name, duplicates keyed by identifier + currency, validation through the prefilled create dialog (FR70); one pending draft per target, provider market facts not draftable, missing target not validatable (FR72); `?` in every case, validation undoable and recorded (FR74, FR77); older builds refuse exports carrying notes/AI marks/drafts (FR60); dossier identity is not configuration (NFR-S4, Appendix A); CLI/AI façade wording updated"
   - date: '2026-10-01'
     changes: "H3 text reconciliation (Epic 8 retro action H3, widened by the 2026-10-01 project review, revue-projet-2026-10-01/p1-*.md and p2-ecarts-textes.md): the text now states what main does, each changed passage tagged « réconcilié 2026-10-01 ». FR20 + Journey 2b + scope (a divergent refresh freezes a ✓ cell, provider value parked — issue #110 / PR #123); FR33 [P1] (app-side dimmed seeds and « hist. » chips — issue #121 / PR #137); FR68 (current verdict always live, difference shown on any change, no FX in a study verdict — D11 / A13 / story 8.8 decision 1; [P4] label); FR60 (the G2 round-3 entry above is corrected: an older build refuses only the drafts table, it silently drops notes, AI marks and the frozen verdict — D9 withdrawn, story 8.1); FR41 + Appendix A (one default withholding rate, configurable, per-entry override — story 6.4); FR3 (projection window, 5-year horizon — story 2.11); FR28 (the rate's date is its freshness state — story 6.6); FR62 (help = glossary hub in Réglages; demo reachable from the study list — story 2.13, PR #279/#284); FR67 (sync folder: warning + recommendation, manual backups — story 5.5); FR5/FR10/FR12/FR23/FR50/FR63 updated for the fixes of PRs #274–#286 (listing-currency refusal, stale fetched price degrades the verdict, confrontation from the frozen band, zone nouns follow the label set). Owner decisions still open are marked « Décision en attente (Guy) » (price age horizon, mixed statement currency, GBX, comparison/PDF neutral wording, confrontation re-validation date) — not decided here. Earlier entries kept unchanged."
+  - date: '2026-10-01'
+    changes: "FR23 + Appendix A: the price age horizon is implemented (owner decision Guy 2026-10-01) — a current price, fetched or typed, older than N trading days (Monday–Friday, default 1, set in Réglages) is stale and the verdict provisional; computed at read time, never stored. Tagged « réconcilié 2026-10-01 »."
+  - date: '2026-10-03'
+    changes: "Review of PR #293: FR12 names the age horizon as a cause of a stale price; FR23 + Appendix A state the no-holiday-calendar limitation, the same-price renewal on a later day, the frozen-verdict difference once a price ages and the MCP `computed.price_aged`. Tagged « réconcilié 2026-10-03 »."
   - date: '2026-10-03'
     changes: "Owner decision 2026-10-01 (« les quotations doivent être de vraies valeurs ») reconciled, PR #291 and its review: the GBX item of the 2026-10-01 entry's open decisions is DECIDED — listings quoted in a currency's hundredths (GBX, GBp, ZAc, ILA) are converted to the major currency at the fetch, no longer refused (FR5, réconcilié 2026-10-01). Method spec §3 and architecture state the holdings price-only rule (converted when the unit is known; refused, named, nothing applied when unknown on a hundredths venue) and the statements / trailing EPS unit, vérifié 2026-10-03 sur ULVR.LSE (the one real fetch the owner authorised): prices in pence (GBX), trailing EPS in GBP, statements in EUR — never divided; a London listing reporting in a third currency falls under the existing mixed-currency warning (FR5, réconcilié 2026-10-03 : revue PR #291). Earlier entries kept unchanged."
+  - date: '2026-10-03'
+    changes: "Owner decisions on PR #293 (Guy 2026-10-03): FR12 + Appendix A — a current price with no recorded origin has an unknown date and counts as stale (« Prix actuel — date inconnue », traceability, PDF, MCP `computed.price_age`); the trading day is counted in local time; no holiday calendar, limitation accepted. The « Décision en attente (Guy) » on these points is replaced by the decided rule, tagged « réconcilié 2026-10-03 »."
+  - date: '2026-10-03'
+    changes: "PR #293 brought up to date with main (PR #289, PR #291), then decisions C and D carried to the shown dates: Appendix A — an origin whose date cannot be read counts as an unknown date (« date inconnue », stale, its source named), and the date shown for a price origin in the traceability and the study PDF is the local day the age counts from (« séance du … » stays the provider's date). Tagged « réconcilié 2026-10-03 »."
 ---
 
 # Product Requirements Document - steadyinvest
@@ -782,8 +790,11 @@ withholding-refund tracking, export/share, eventual public release.
   the rule that produced the result.
 - FR12 **[P1]:** The verdict's presentation is **degraded or withheld testably** when a load-bearing
   input is not validated or the study is low-confidence (Appendix A defines "load-bearing input").
-  A fetched current price flagged stale by a failed refresh makes the verdict provisional, naming
-  « Prix actuel — périmé »; the price's origin (provider and session, or typed) is recorded and shown
+  A stale current price — flagged by a failed refresh, or older than the age horizon of FR23 — makes
+  the verdict provisional, naming « Prix actuel — périmé » (réconcilié 2026-10-03 : revue PR #293);
+  a current price with no recorded origin has an unknown date and makes it provisional too, naming
+  « Prix actuel — date inconnue » (réconcilié 2026-10-03 : décision Guy);
+  the price's origin (provider and session, or typed) is recorded and shown
   in the traceability and the study PDF (réconcilié 2026-10-01 : PR #274, PR #286).
 - FR13 **[P1]:** All **app-generated** signals are **neutral** — no app output contains an
   action/recommendation verb from the banned-verb list in Appendix A (verifiable). AI-origin text is
@@ -818,9 +829,13 @@ withholding-refund tracking, export/share, eventual public release.
   manual value.
 - FR23 **[P1]:** On provider failure, last-known values are retained and affected data is flagged
   **stale/to-update** — including a fetched current price (not one written the same day); a
-  successful refresh clears the flag (réconcilié 2026-10-01 : PR #274). Data becomes stale only on a
-  failed refresh: the age horizon of Appendix A is not implemented. Décision en attente (Guy) :
-  seuil d'âge du cours (« un jour de bourse » par défaut, réglable) — à implémenter ou à retirer.
+  successful refresh clears the flag (réconcilié 2026-10-01 : PR #274). The current price is also
+  stale once older than the age horizon of Appendix A — one trading day by default, set in Réglages
+  (« Cours périmé après (jours de bourse) »); the age is computed when the study is read, never
+  stored (réconcilié 2026-10-01 : décision Guy, horizon d'âge du cours). With no exchange-holiday
+  calendar, after a holiday the latest close counts as stale under the default horizon of 1 until
+  the next close is fetched; a validated study whose price ages shows « Le verdict actuel diffère du
+  verdict figé » (FR68) (réconcilié 2026-10-03 : revue PR #293).
 - FR24 **[P1]:** A provider failure's **cause** (network, quota/rate-limit, invalid/absent key) is
   recorded and reported.
 - FR25 **[P1]:** The user can use keyless providers, and **add/replace/delete/test** a provider API key
@@ -1140,8 +1155,31 @@ withholding-refund tracking, export/share, eventual public release.
   35%), configurable in Réglages and overridable per entry; per-jurisdiction rate tables out of scope
   (réconcilié 2026-10-01 : story 6.4); study uses gross.
 - **Stale threshold (FR23):** price data older than the user-configured horizon (default: older than
-  one trading day) is flagged stale. Décision en attente (Guy) : ce seuil d'âge n'est pas implémenté
-  — aujourd'hui seul un rafraîchissement en échec rend un cours périmé (PR #274).
+  one trading day) is flagged stale (réconcilié 2026-10-01 : décision Guy). As built: the horizon is a
+  whole number of trading days (Monday–Friday, no holiday calendar; 1–260, default 1) in Réglages; the
+  price's date is the provider's session date, else the date it was fetched or typed — a typed price
+  ages too; a price older than the horizon is « périmé » and the verdict provisional, exactly as after
+  a failed refresh (PR #274), on screen, in the PDF and in the MCP `get_study` verdict. Stated
+  limitations and consequences (réconcilié 2026-10-03 : revue PR #293): with no holiday calendar a
+  holiday counts as a trading day, so after an exchange holiday the latest close is stale for a
+  horizon of 1 until the next close is fetched; the same price confirmed on a later day — retyped,
+  or fetched again without a session date — is a new write and fresh again (the same day, or the
+  same provider session, changes nothing); a validated study whose price ages shows « Le verdict
+  actuel diffère du verdict figé » (FR68), its current verdict being provisional; the MCP
+  `get_study` states the age as `computed.price_aged` with the horizon used
+  (`computed.price_stale_after_trading_days`). Decided by the owner (réconcilié 2026-10-03 :
+  décisions Guy, revue PR #293): the trading day — today and the day a price was fetched or typed —
+  is counted in the owner's **local** time (a provider's session date is taken as given); a current
+  price with **no recorded origin** (written before origins were recorded) has an unknown date and
+  counts as stale — the verdict provisional, naming « Prix actuel — date inconnue » (distinct from
+  « périmé »), the traceability and the study PDF saying its date is unknown, the MCP `get_study`
+  `computed.price_age` = `"unknown"` (else `"fresh"` / `"aged"`) with `price_aged` true; retyping
+  or fetching the price records its origin and makes it fresh; a study with no current price is
+  unchanged (missing input). The absence of a holiday calendar is an accepted limitation. An origin
+  whose date cannot be read counts as an unknown date the same way (« date inconnue », stale, its
+  source still named), and the date shown for an origin (« récupéré le … », « saisi le … ») is the
+  local day the age is counted from, so the shown day never contradicts the age; a provider's
+  « séance du … » is its own date (réconcilié 2026-10-03 : décisions Guy C et D, PR #293).
 - **Neutrality (FR13):** app-generated signals contain **no imperative action verb** (buy/sell/
   hold as a command); they state facts only. (Exact banned-verb list finalized in Architecture.)
   Scope rule: AI-origin text is outside the banned-verb gate; it is always shown inside a frame

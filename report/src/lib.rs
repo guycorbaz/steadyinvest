@@ -13,6 +13,7 @@ pub mod comparison;
 pub mod form;
 pub mod frozen;
 pub mod pdf;
+pub mod price_age;
 pub mod quick_screen;
 pub mod review;
 

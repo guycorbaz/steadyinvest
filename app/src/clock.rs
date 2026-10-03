@@ -14,12 +14,18 @@
 
 use chrono::{SecondsFormat, Utc};
 use steadyinvest_contract::Timestamp;
+use steadyinvest_report::price_age::DayZone;
 use uuid::Uuid;
 
 /// The app's wall clock. The single source of "now" — injected so tests are deterministic.
 pub trait Clock {
     /// Current instant as an RFC3339 UTC [`Timestamp`] (e.g. `2026-06-13T10:30:00Z`).
     fn now(&self) -> Timestamp;
+
+    /// The zone a stamp's **day** is read in (FR23 price age — owner decision D, Guy 2026-10-03:
+    /// the trading day is the owner's local day). Injected with the clock so a test never depends
+    /// on the machine's zone.
+    fn day_zone(&self) -> DayZone;
 }
 
 /// The app's identity source. The single source of new UUIDs — injected so tests are deterministic.
@@ -35,6 +41,11 @@ pub struct SystemClock;
 impl Clock for SystemClock {
     fn now(&self) -> Timestamp {
         Timestamp(Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true))
+    }
+
+    /// The machine's local zone (the owner's day).
+    fn day_zone(&self) -> DayZone {
+        DayZone::Local
     }
 }
 
@@ -57,6 +68,11 @@ pub struct FixedClock(pub Timestamp);
 impl Clock for FixedClock {
     fn now(&self) -> Timestamp {
         self.0.clone()
+    }
+
+    /// UTC — deterministic whatever the machine's zone.
+    fn day_zone(&self) -> DayZone {
+        DayZone::UTC
     }
 }
 

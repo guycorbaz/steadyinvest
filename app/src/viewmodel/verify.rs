@@ -529,7 +529,12 @@ mod tests {
                     "{:?}\n{:?}\n{:?}\n{:?}\n{} {:?}\n",
                     engine::mgmt_computed(outputs, &years, format),
                     engine::scenario_outcome(snapshot, format),
-                    engine::verdict_trace(study, snapshot, format),
+                    engine::verdict_trace(
+                        study,
+                        snapshot,
+                        format,
+                        steadyinvest_report::price_age::DayZone::UTC
+                    ),
                     engine::plausibility(&frame.plausibility, &outputs.findings, &years),
                     engine::study_incomplete(snapshot),
                     engine::required_judgment_fields(snapshot),

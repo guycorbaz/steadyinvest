@@ -158,19 +158,25 @@ pub fn judgment_to_gate_state(value: Option<Money>) -> GateState {
 }
 
 /// The current price → [`GateState`] (Guy's on-screen test 2026-10-01, FR12 / FR23): `None` →
-/// `Missing`; a price whose provider origin was flagged stale by a failed refresh → `Stale` (the
-/// verdict degrades, as for a stale provider cell); otherwise `ValidatedFresh` — a fetched price
-/// is the owner's own gesture (he asked for the fetch), a typed one his own number.
+/// `Missing`; a price whose origin is stale — flagged by a failed refresh, or older than the age
+/// horizon on this read ([`crate::price_age`], marked by the caller's read) — → `Stale` (the
+/// verdict degrades, as for a stale provider cell); a price with **no recorded origin** (written
+/// before origins were recorded), or whose date cannot be read, has an unknown date → `Stale` too
+/// (owner decision C, Guy 2026-10-03 — its open gate is named « date inconnue », apart from
+/// « périmé »: [`crate::price_age::PriceAge::UnknownDate`]); otherwise `ValidatedFresh` — a
+/// fetched price is the owner's own gesture (he asked for the fetch), a typed one his own number.
 pub fn price_to_gate_state(
     value: Option<Money>,
     origin: Option<&steadyinvest_contract::PriceOrigin>,
 ) -> GateState {
     match (value, origin) {
         (None, _) => GateState::Missing,
-        (Some(_), Some(o)) if o.freshness == steadyinvest_contract::Freshness::Stale => {
-            GateState::Stale
-        }
-        (Some(_), _) => GateState::ValidatedFresh,
+        (Some(_), Some(o)) if o.is_stale() => GateState::Stale,
+        // No recorded origin, or one whose date cannot be read: the price's date is unknown —
+        // stale (decision C, 2026-10-03).
+        (Some(_), None) => GateState::Stale,
+        (Some(_), Some(o)) if !crate::price_age::price_date_known(o) => GateState::Stale,
+        (Some(_), Some(_)) => GateState::ValidatedFresh,
     }
 }
 
@@ -393,7 +399,7 @@ pub fn frozen_inputs(study: &Study, series: &[CanonicalYear]) -> BTreeMap<String
 pub const ABSENT: &str = "absent";
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use steadyinvest_contract::{
         Cell, Coverage, Freshness, Money, Provenance, Review, Source, Timestamp, YearData,
@@ -423,10 +429,16 @@ mod tests {
         }
     }
 
-    fn full_study() -> Study {
+    pub(crate) fn full_study() -> Study {
         let judgment = Judgment {
             ai_placed: Default::default(),
-            current_price_origin: None,
+            current_price_origin: Some(steadyinvest_contract::PriceOrigin {
+                source: steadyinvest_contract::Source::Manual,
+                at: steadyinvest_contract::Timestamp("2026-03-09T09:30:00Z".to_string()),
+                session_date: None,
+                freshness: steadyinvest_contract::Freshness::Current,
+                aged: false,
+            }),
             estimated_high_eps: Some(money_of("9")),
             estimated_low_eps: Some(money_of("4")),
             projected_sales_growth_pct: None,
@@ -521,12 +533,13 @@ mod tests {
             at: Timestamp("2026-10-01T09:00:00Z".to_string()),
             session_date: None,
             freshness,
+            aged: false,
         };
         assert_eq!(price_to_gate_state(None, None), GateState::Missing);
         assert_eq!(
             price_to_gate_state(price, None),
-            GateState::ValidatedFresh,
-            "unknown origin"
+            GateState::Stale,
+            "unknown origin: date unknown, stale (decision C)"
         );
         assert_eq!(
             price_to_gate_state(price, Some(&o(Source::Provider, Freshness::Current))),
@@ -545,5 +558,12 @@ mod tests {
             GateState::Missing,
             "no price: missing whatever its stale origin says"
         );
+        // FR23 age horizon (2026-10-01): an origin the read marked aged is stale too, whatever
+        // its source — a typed price ages like a fetched one.
+        let aged = PriceOrigin {
+            aged: true,
+            ..o(Source::Manual, Freshness::Current)
+        };
+        assert_eq!(price_to_gate_state(price, Some(&aged)), GateState::Stale);
     }
 }
