@@ -183,15 +183,30 @@ pub(crate) fn session_from_fetch(
         .cloned()
         .collect();
     let outputs = examine(&years, fetched.latest_price, fetched.ttm_eps);
+    let source = with_conversion(
+        state::MSG_QUICK_SOURCE_PROVIDER.replace("{provider}", effective.display_name()),
+        fetched.listing_subunit.as_deref(),
+        &fetched.native_currency,
+    );
     QuickScreenSession {
         ticker: ticker.to_uppercase(),
         currency: currency.to_string(),
         name: String::new(),
-        source: state::MSG_QUICK_SOURCE_PROVIDER.replace("{provider}", effective.display_name()),
+        source,
         from_study: false,
         from_watchlist: false,
         outputs,
         fetched: Some(fetched),
+    }
+}
+
+/// PR #291 review: the examination's source names a conversion from hundredths (GBX…) — the
+/// traceability's own line, after the source — on the screen and in its PDF alike (both print
+/// `source`). Unchanged when the prices were served as is.
+fn with_conversion(source: String, subunit: Option<&str>, major: &str) -> String {
+    match steadyinvest_report::listing_subunit_note(subunit, major) {
+        Some(line) => format!("{source} · {line}"),
+        None => source,
     }
 }
 
@@ -209,7 +224,11 @@ pub(crate) fn session_from_study(
         ticker: study.security_ticker.clone(),
         currency: study.native_currency.clone(),
         name: study.company_name.clone().unwrap_or_default(),
-        source: state::MSG_QUICK_SOURCE_STUDY.to_string(),
+        source: with_conversion(
+            state::MSG_QUICK_SOURCE_STUDY.to_string(),
+            study.listing_subunit.as_deref(),
+            &study.native_currency,
+        ),
         from_study: true,
         from_watchlist: false,
         outputs,
@@ -826,6 +845,21 @@ mod tests {
             ticker: "NESN.SW".into(),
             message: "m".into(),
         }
+    }
+
+    // PR #291 review: the examination's source names a conversion from hundredths, with the
+    // traceability's wording; nothing is added when the prices were served as is.
+    #[test]
+    fn the_source_names_a_conversion_from_hundredths() {
+        assert_eq!(
+            with_conversion("fournisseur : EODHD".into(), Some("GBX"), "GBP"),
+            "fournisseur : EODHD · Cotation du fournisseur en GBX (centièmes) : cours récupérés \
+             convertis en GBP (÷ 100)"
+        );
+        assert_eq!(
+            with_conversion("depuis l'étude".into(), None, "GBP"),
+            "depuis l'étude"
+        );
     }
 
     #[test]

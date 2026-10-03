@@ -116,6 +116,10 @@ impl JournalState {
         // Issue #113: the trailing-twelve-months EPS (current-P/E denominator), a present market fact
         // riding alongside the price (not part of the canonical annual calc).
         let ttm_eps = fetched.ttm_eps;
+        // Owner decision 2026-10-01: the provider's hundredths code (GBX…) when the ingestion
+        // converted this fetch's prices — recorded on the study for the traceability and for the
+        // price-only refresh, whose bare quote states no currency. A fetch served as is clears it.
+        let listing_subunit = fetched.listing_subunit.clone();
         let report = std::cell::Cell::new(RefreshReport::default());
         let report_ref = &report;
         self.mutate_study(study_id, move |study| {
@@ -167,6 +171,7 @@ impl JournalState {
             if let Some(ttm) = ttm_eps {
                 study.judgment.ttm_eps = Some(Money::from(ttm));
             }
+            study.listing_subunit = listing_subunit.clone();
             report_ref.set(acc);
         })?;
         // Story 5.1: cache the latest close into the price-history trajectory (confront's source).
@@ -495,6 +500,38 @@ pub(crate) fn provider_figure_predates_method(cell: &Cell) -> bool {
         && cell.value.is_some()
         && cell.review != Review::Validated
         && steadyinvest_core::predates_inputs_definition(fetched_under(&cell.provenance))
+}
+
+/// PR #291 review (owner decision 2026-10-01 — hundredths converted): is the UNIT of a price-only
+/// quote of `ticker` (linked to `study`) unknown? The bare `/eod` or `/price` close states no
+/// currency, so only the study's last fetch can say whether the provider quotes it in hundredths
+/// (`listing_subunit` = `GBX`…, converted) or as is. `listing_subunit` = `None` means two things —
+/// « served as is » or « never fetched » — told apart by IDENTITY of origin, not by the field's
+/// emptiness (the discriminator rule): a study that holds a provider-sourced yearly cell was
+/// fetched, so its `None` is « as is ». Unknown = never fetched (typed, from an AI draft) AND the
+/// ticker sits on a venue that quotes in hundredths (London, Johannesburg, Tel Aviv): the raw
+/// close may be pence — never applied as pounds (wrong §4 zone, a stop ratcheted ×100 that never
+/// comes down, a polluted price history). Any other venue: the close is applied as before.
+pub fn price_unit_unknown(study: &Study, ticker: &str) -> bool {
+    if study.listing_subunit.is_some() || !steadyinvest_ingestion::ticker::hundredths_venue(ticker)
+    {
+        return false;
+    }
+    let fetched_once = study.years.iter().any(|y| {
+        [&y.sales, &y.eps, &y.high_price, &y.low_price]
+            .into_iter()
+            .chain(
+                [
+                    y.dividend_per_share.as_ref(),
+                    y.pre_tax_profit.as_ref(),
+                    y.book_value_per_share.as_ref(),
+                ]
+                .into_iter()
+                .flatten(),
+            )
+            .any(|c| c.source == Source::Provider || c.pending.is_some())
+    });
+    !fetched_once
 }
 
 /// Issue #252: how many provider figures of `study` predate today's definition of the inputs — the

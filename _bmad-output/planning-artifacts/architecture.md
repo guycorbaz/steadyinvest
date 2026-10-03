@@ -471,11 +471,30 @@ against this skeleton as the principal go/no-go before committing UI work.
   stale only after a failure, never by age. **Décision en attente (Guy) : horizon d'âge du cours
   (FR23, « un jour de bourse » par défaut, réglable) — non implémenté.** An unknown symbol's notice
   names the app's ticker convention (`.DE` → `.XETRA`, `.AX` → `.AU`; `ingestion::ticker`). A
-  provider listing currency different from the study's is **refused** before anything is applied,
-  as is a listing quoted in hundredths (GBX, GBp, ZAc, ILA); statements reported in another
-  currency than the listing are applied with a named **warning**. **Décision en attente (Guy) :
-  comptes publiés dans une autre devise — avertir ou bloquer ; cotations en centièmes (GBX…) —
-  refusées, convertir ou non.**
+  provider listing currency different from the study's is **refused** before anything is applied.
+  A listing quoted in hundredths (GBX, GBp → GBP; ZAc → ZAR; ILA → ILS) is **converted** at one
+  place, `ingestion::subunit`, called by `fetch_canonical` and `fetch_price` before `normalize`:
+  price figures ÷ 100 (exact decimal), `native_currency` = the major code, the provider's code in
+  `FetchedFinancials.listing_subunit` → `Study.listing_subunit` (additive serde field; traceability
+  line, and the price-only holdings refresh, whose bare quote states no currency, converts on it);
+  statement figures are never divided (réconcilié 2026-10-01 : décision Guy, conversion des
+  centièmes) — a statement amount without its own currency is relabelled to the major code, not
+  divided. Holdings price-only rule: converted when the unit is known (`Study.listing_subunit`, or
+  a study holding provider-sourced cells = fetched and served as is); **refused** when unknown on a
+  hundredths venue (`ingestion::ticker::hundredths_venue` — `.LSE`/`.L`, `.JSE`/`.JO`, `.TA`; pure
+  predicate `state::price_unit_unknown`): not fetched, nothing applied (price, stop ratchet, price
+  history), named (`MSG_HOLDINGS_UNIT_UNKNOWN`). The conversion line (`report::LISTING_SUBUNIT_LINE`)
+  is the same in the traceability, the study PDF and the quick screen (réconcilié 2026-10-03 : revue
+  PR #291). Unit of the fundamentals of a hundredths listing — vérifié 2026-10-03 sur ULVR.LSE:
+  `General.CurrencyCode` `GBX`, `/eod` close 4483.5 (pence); `Highlights.EarningsShare` 2.18 in GBP
+  (the served `PERatio` 20.5665 = 44.835 GBP ÷ 2.18), dividend figures in GBP too → the trailing EPS
+  is never divided; the statement rows state `currency_symbol` EUR (Unilever reports in euros). A
+  London listing may thus report in a **third currency**: its statements are neither divided nor
+  relabelled and take the mixed-currency path below (`currency_mismatch`,
+  `FetchedFinancials.reported_currencies` → « comptes publiés en EUR, cotation en GBP »); pinned by
+  the trimmed real extract `ingestion/tests/fixtures/eodhd-*-ULVR-real.json`.
+  Statements reported in another currency than the listing are applied with a named
+  **warning**. **Décision Guy 2026-10-01 (réconcilié 2026-10-03) : comptes publiés dans une autre devise que la cotation — acceptés avec l'avertissement nommé, jamais bloqués (NOVN, ABB : cotés en CHF à SIX) ; une conversion au taux moyen de chaque exercice reste à proposer en story.**
 - **Errors:** `thiserror` 2.0 domain errors per crate; neutral, cause-named messages; **no silent
   `.ok()`** (explicit lesson from the prior project's chart-rendering bugs).
 

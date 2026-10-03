@@ -111,6 +111,7 @@ fn canonical_study() -> Study {
         company_name: None,
         notes: Vec::new(),
         frozen_verdict: None,
+        listing_subunit: None,
         created_at: ts("2026-06-12T08:30:00Z"),
         schema_version: SCHEMA_VERSION,
     }

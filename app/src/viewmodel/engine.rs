@@ -785,7 +785,7 @@ pub fn scenario_compare(
 pub fn verdict_trace(study: &Study, snapshot: &StudySnapshot, format: NumberFormat) -> TraceState {
     let verdict = snapshot.verdict();
     let j = &study.judgment;
-    let inputs: Vec<slint::SharedString> = vec![
+    let mut inputs: Vec<slint::SharedString> = vec![
         trace_input(
             LBL_EST_HIGH_EPS,
             j.estimated_high_eps,
@@ -821,6 +821,9 @@ pub fn verdict_trace(study: &Study, snapshot: &StudySnapshot, format: NumberForm
         trace_price(j, format).into(),
         trace_yearly(study).into(),
     ];
+    if let Some(line) = trace_listing_subunit(study) {
+        inputs.push(line.into());
+    }
     let open_gates: Vec<slint::SharedString> = verdict
         .open_gates()
         .iter()
@@ -902,6 +905,18 @@ fn trace_price(j: &steadyinvest_contract::Judgment, format: NumberFormat) -> Str
         }
     };
     format!("{LBL_CURRENT_PRICE} : {shown} ({origin})")
+}
+
+/// Owner decision 2026-10-01: the line that names a listing the provider quotes in a currency's
+/// hundredths (`GBX`…) — its fetched prices (yearly high / low, latest close) were divided by 100
+/// at the fetch into the study's currency. `None` when the last fetch served the prices as is.
+/// The wording is the report's `LISTING_SUBUNIT_LINE` (PR #291 review: one line for the trace, the
+/// study PDF and the quick screen; its neutrality is scanned with the report's strings).
+fn trace_listing_subunit(study: &Study) -> Option<String> {
+    steadyinvest_report::listing_subunit_note(
+        study.listing_subunit.as_deref(),
+        &study.native_currency,
+    )
 }
 
 /// The yearly data's provenance in one line (FR11): how many filled cells came from the provider
@@ -2231,6 +2246,21 @@ mod tests {
         );
         j.current_price = None;
         assert_eq!(trace_price(&j, NumberFormat::Comma), "Prix actuel : —");
+    }
+
+    // Owner decision 2026-10-01: a listing quoted in hundredths is named, with its conversion.
+    #[test]
+    fn the_trace_names_a_listing_converted_from_hundredths() {
+        let mut study = study_with(vec![], full_judgment());
+        study.native_currency = "GBP".to_string();
+        assert_eq!(trace_listing_subunit(&study), None);
+        study.listing_subunit = Some("GBX".to_string());
+        assert_eq!(
+            trace_listing_subunit(&study).as_deref(),
+            Some(
+                "Cotation du fournisseur en GBX (centièmes) : cours récupérés convertis en GBP (÷ 100)"
+            )
+        );
     }
 
     #[test]
