@@ -215,7 +215,10 @@ pub fn reported_currencies(financials: &steadyinvest_core::RawFinancials) -> Vec
 /// `listing_subunit` (owner decision 2026-10-01): the hundredths code the study fetch recorded for
 /// this symbol (`GBX`…) — a bare `/eod` or `/price` body states no currency, so the caller says
 /// what the last study fetch learned; the close is then converted to the major unit here, by the
-/// same rule as [`fetch_canonical`]. `None` (or any other code) = the close as served.
+/// same rule as [`fetch_canonical`]. `None` (or any other code) = the close as served — the app
+/// never asks with `None` for a study it never fetched on a venue quoting in hundredths
+/// ([`crate::ticker::hundredths_venue`]): that unit is unknown, the quote is refused before the
+/// fetch (PR #291 review).
 pub async fn fetch_price(
     provider: &Provider,
     ticker: &str,
@@ -670,6 +673,9 @@ mod tests {
             years: vec![RawYear {
                 sales: amt("5000000000", "GBP"),
                 eps: amt("0.45", "GBP"),
+                // A statement row with no `currency_symbol`: the adapter labels it with the
+                // listing code (PR #291 review).
+                net_profit: amt("4000000000", code),
                 high_price: amt("1234.5", code),
                 low_price: amt("987", code),
                 ..RawYear::empty(2024)
@@ -700,8 +706,14 @@ mod tests {
         assert_eq!(y.high_price, Some(d("12.345")));
         assert_eq!(y.low_price, Some(d("9.87")));
         assert_eq!(y.eps, Some(d("0.45")));
-        // The statements in pounds are no longer « another currency » than the listing.
+        // The statements in pounds are no longer « another currency » than the listing — nor is
+        // a row that stated no currency (relabelled GBP, never divided, PR #291 review).
         assert!(fetched.reported_currencies.is_empty());
+        assert!(
+            fetched.canonical.findings.is_empty(),
+            "no currency_mismatch: {:?}",
+            fetched.canonical.findings
+        );
 
         // A listing in pounds is served as is, and says so.
         let pounds = Provider::Fake(FakeProvider::returning_with_price(

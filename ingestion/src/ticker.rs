@@ -62,6 +62,26 @@ pub fn convention_suggestion(ticker: &str) -> Option<String> {
     Some(format!("{}.{venue}", base.to_ascii_uppercase()))
 }
 
+/// PURE: the stored ticker is listed on a venue that quotes its prices in a currency's hundredths
+/// (PR #291 review): London (pence — EODHD's `.LSE`, and the `.L` of the [`venue_mic`] table and
+/// Yahoo), Johannesburg (cents — EODHD's `.JSE`, Yahoo's `.JO`), Tel Aviv (agorot — `.TA`). Not
+/// every line there is quoted in hundredths (a London line may be quoted in GBP or USD): this says
+/// only that the unit cannot be assumed — the provider's listing code decides. Case-insensitive;
+/// a share class (`BRK.B`) or an unmapped suffix is `false`.
+pub fn hundredths_venue(ticker: &str) -> bool {
+    let Some((base, suffix)) = ticker.trim().rsplit_once('.') else {
+        return false;
+    };
+    !base.is_empty()
+        && HUNDREDTHS_VENUES
+            .iter()
+            .any(|venue| suffix.eq_ignore_ascii_case(venue))
+}
+
+/// The venue suffixes of [`hundredths_venue`] — both spellings where EODHD and the common
+/// convention differ.
+const HUNDREDTHS_VENUES: [&str; 5] = ["LSE", "L", "JSE", "JO", "TA"];
+
 /// Foreign suffix → the app's (EODHD's) venue suffix, for [`convention_suggestion`].
 const CONVENTION_SUGGESTIONS: [(&str, &str); 2] = [("DE", "XETRA"), ("AX", "AU")];
 
@@ -86,6 +106,31 @@ mod tests {
         assert_eq!(known_venue("NESN.XX"), None); // unmapped: absent, never a guess
         assert_eq!(known_venue("NESN"), None);
         assert_eq!(known_venue(".SW"), None);
+    }
+
+    #[test]
+    fn a_hundredths_venue_is_named_by_its_suffix_only() {
+        for ticker in [
+            "ULVR.LSE",
+            "ulvr.lse",
+            "VOD.L",
+            " NPN.JSE ",
+            "NPN.JO",
+            "TEVA.TA",
+        ] {
+            assert!(hundredths_venue(ticker), "{ticker:?}");
+        }
+        for ticker in [
+            "NESN.SW",
+            "AAPL.US",
+            "AAPL",
+            ".LSE",
+            "BRK.B",
+            "SAP.XETRA",
+            "",
+        ] {
+            assert!(!hundredths_venue(ticker), "{ticker:?}");
+        }
     }
 
     #[test]

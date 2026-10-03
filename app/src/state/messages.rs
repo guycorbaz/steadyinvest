@@ -285,6 +285,11 @@ pub const MSG_TICKER_SUGGESTION: &str =
 pub const MSG_CURRENCY_STUDY_MISMATCH: &str = "Le fournisseur donne {ticker} en {provider}, l'étude est en {study} ; une étude se tient dans la devise de ses chiffres, rien n'a été appliqué.";
 /// The same for an examination: the currency picked, no study yet.
 pub const MSG_CURRENCY_CHOSEN_MISMATCH: &str = "Le fournisseur donne {ticker} en {provider}, la devise choisie est {chosen} ; rien n'est montré dans une autre devise que la sienne.";
+/// PR #291 review: the study (or the currency picked) is in the provider's hundredths code itself
+/// (`GBX`) — the fetch converts those prices to the major currency, so the study belongs in it.
+/// Neither « en GBP, l'étude est en GBX » (which reads as two unrelated currencies) nor a silent
+/// acceptance: named, nothing applied.
+pub const MSG_CURRENCY_SUBUNIT_EXPECTED: &str = "Le fournisseur cote {ticker} en centièmes de devise ({subunit}) ; l'application convertit ces cours en {major} (÷ 100) : la devise à retenir est {major}, pas {expected}. Rien n'a été appliqué.";
 /// FR10 (G3 review): statements reported in another currency than the listing — a visible warning,
 /// never a block (method spec §3: plausibility warnings never block the computation).
 pub const MSG_CURRENCY_MIXED: &str = "Les comptes de {ticker} sont publiés en {reported}, sa cotation est en {listing} : le PER, les zones et les ratios mêlent deux devises sans conversion.";
@@ -496,6 +501,17 @@ pub const MSG_REFRESH_CANCELLED: &str =
     "Actualisation annulée ; les éléments déjà obtenus sont conservés.";
 pub const MSG_HOLDINGS_REFRESH_NONE: &str =
     "Aucune position liée à une étude ; il n'y a aucun prix à rafraîchir.";
+/// PR #291 review (owner decision 2026-10-01): a price-only quote whose unit is unknown — the
+/// linked study was never fetched from the provider and its venue quotes in hundredths
+/// ([`crate::state::price_unit_unknown`]): the close may be pence, so nothing is applied (no
+/// price, no stop ratchet, no price history). `{tickers}` = the symbols, comma-separated.
+pub const MSG_HOLDINGS_UNIT_UNKNOWN: &str = "Prix non actualisé pour {tickers} : la place cote souvent en centièmes de devise, et l'unité du fournisseur reste inconnue tant que l'étude liée n'a pas été récupérée une fois depuis le fournisseur (« ⤓ Récupérer (fournisseur) »). Rien n'a été appliqué.";
+
+/// The refusal of a holdings price refresh for the tickers whose price unit is unknown
+/// ([`MSG_HOLDINGS_UNIT_UNKNOWN`]), each named.
+pub fn holdings_unit_unknown_notice(tickers: &[String]) -> String {
+    MSG_HOLDINGS_UNIT_UNKNOWN.replace("{tickers}", &tickers.join(", "))
+}
 
 /// Recorded-sell copy (Story 4.7, FR46/FR47) — fact-stating, posture-gated. Set when the user
 /// records a sell from a neutral trigger: the sell is journalled and the holding leaves the register.
@@ -1131,6 +1147,22 @@ pub fn currency_refusal(
     if listing.is_empty() || listing == expected {
         return None;
     }
+    // PR #291 review: the study's currency IS the provider's hundredths code (GBX) — the converted
+    // listing is in the major currency; say so rather than « en GBP, l'étude est en GBX ».
+    if let Some(subunit) = fetched
+        .listing_subunit
+        .as_deref()
+        .map(str::trim)
+        .filter(|code| code.eq_ignore_ascii_case(&expected))
+    {
+        return Some(
+            MSG_CURRENCY_SUBUNIT_EXPECTED
+                .replace("{ticker}", ticker)
+                .replace("{subunit}", subunit)
+                .replace("{major}", &listing)
+                .replace("{expected}", &expected),
+        );
+    }
     let template = if for_study {
         MSG_CURRENCY_STUDY_MISMATCH.replace("{study}", &expected)
     } else {
@@ -1389,6 +1421,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_TICKER_SUGGESTION,
     MSG_CURRENCY_STUDY_MISMATCH,
     MSG_CURRENCY_CHOSEN_MISMATCH,
+    MSG_CURRENCY_SUBUNIT_EXPECTED,
     MSG_CURRENCY_MIXED,
     MSG_REFRESH_NOCHANGE,
     MSG_REFRESH_PRICE,
@@ -1441,6 +1474,7 @@ pub const USER_FACING_MESSAGES: &[&str] = &[
     MSG_HOLDINGS_REFRESHING,
     MSG_REFRESH_CANCELLED,
     MSG_HOLDINGS_REFRESH_NONE,
+    MSG_HOLDINGS_UNIT_UNKNOWN,
     MSG_HOLDING_SOLD,
     MSG_LEDGER_BUY_RECORDED,
     MSG_LEDGER_PARTIAL_SOLD,

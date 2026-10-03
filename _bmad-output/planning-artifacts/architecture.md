@@ -478,7 +478,16 @@ against this skeleton as the principal go/no-go before committing UI work.
   `FetchedFinancials.listing_subunit` → `Study.listing_subunit` (additive serde field; traceability
   line, and the price-only holdings refresh, whose bare quote states no currency, converts on it);
   statement figures are never divided (réconcilié 2026-10-01 : décision Guy, conversion des
-  centièmes). Statements reported in another currency than the listing are applied with a named
+  centièmes) — a statement amount without its own currency is relabelled to the major code, not
+  divided. Holdings price-only rule: converted when the unit is known (`Study.listing_subunit`, or
+  a study holding provider-sourced cells = fetched and served as is); **refused** when unknown on a
+  hundredths venue (`ingestion::ticker::hundredths_venue` — `.LSE`/`.L`, `.JSE`/`.JO`, `.TA`; pure
+  predicate `state::price_unit_unknown`): not fetched, nothing applied (price, stop ratchet, price
+  history), named (`MSG_HOLDINGS_UNIT_UNKNOWN`). The conversion line (`report::LISTING_SUBUNIT_LINE`)
+  is the same in the traceability, the study PDF and the quick screen (réconcilié 2026-10-03 : revue
+  PR #291). **Décision en attente (Guy) : unité des états financiers et du BPA sur douze mois
+  d'une cotation en centièmes — supposée principale, à vérifier sur une récupération réelle.**
+  Statements reported in another currency than the listing are applied with a named
   **warning**. **Décision en attente (Guy) : comptes publiés dans une autre devise — avertir ou
   bloquer.**
 - **Errors:** `thiserror` 2.0 domain errors per crate; neutral, cause-named messages; **no silent

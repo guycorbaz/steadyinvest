@@ -879,6 +879,10 @@ const REGISTER_OUTCOMES: &[&str] = &[
     state::MSG_REFRESH_CANCELLED,
 ];
 
+/// One holdings price-refresh job: the linked study, the ticker, and the hundredths code the
+/// study's last fetch recorded (owner decision 2026-10-01).
+type PriceJob = (Uuid, String, Option<String>);
+
 /// Wire the holdings + portfolio domain: the holding add / edit / remove / sell / trailing-stop /
 /// dismiss-trigger intents, the manual price refresh (one worker job per unique linked ticker,
 /// FR65 — user-initiated only), and the Story 6.1 portfolio select / add / rename / delete.
@@ -1154,32 +1158,69 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
         let refresh_total = Rc::clone(refresh_total);
         let fetch_cancel = std::sync::Arc::clone(fetch_cancel);
         let dossier_generation = Rc::clone(dossier_generation);
+        let holding_freshness = Rc::clone(holding_freshness);
+        let holding_dismissed = Rc::clone(holding_dismissed);
         ui.global::<Holdings>().on_refresh_prices(move || {
             let ui = ui_weak.unwrap();
             let holdings = ui.global::<Holdings>();
             let reference = config.borrow().reference_currency_or_default();
             // Owner decision 2026-10-01: each job carries the hundredths code its study's last
             // fetch recorded (GBX…), so the price-only quote is converted like the study's prices.
-            let jobs: Vec<(Uuid, String, Option<String>)> = {
+            // PR #291 review: a ticker whose price unit is unknown (`price_unit_unknown` — never
+            // fetched, on a venue quoting in hundredths) is NOT fetched: its close might be pence
+            // applied as pounds. Nothing is applied for it (price, stop, price history); it is
+            // named and flagged « périmé » (the price the user asked for did not come).
+            let (jobs, unit_unknown): (Vec<PriceJob>, Vec<String>) = {
                 let state = journal_state.borrow();
                 let mut seen = std::collections::HashSet::new();
-                state
+                let mut unit_unknown = Vec::new();
+                let jobs = state
                     .list_holdings()
                     .into_iter()
                     .filter_map(|h| {
                         // Issue #81 + D5: the price-refresh target is the lot's ONE link.
                         state
                             .lot_study_id(&h.security_ticker, h.currency.as_deref(), &reference)
-                            .map(|sid| {
-                                let subunit = state.get_study(sid).and_then(|s| s.listing_subunit);
-                                (sid, h.security_ticker, subunit)
-                            })
+                            .map(|sid| (sid, h.security_ticker))
                     })
-                    .filter(|(_, ticker, _)| seen.insert(ticker.to_uppercase()))
-                    .collect()
+                    .filter(|(_, ticker)| seen.insert(ticker.to_uppercase()))
+                    .filter_map(|(sid, ticker)| {
+                        let study = state.get_study(sid);
+                        if study
+                            .as_ref()
+                            .is_some_and(|s| state::price_unit_unknown(s, &ticker))
+                        {
+                            unit_unknown.push(ticker);
+                            return None;
+                        }
+                        let subunit = study.and_then(|s| s.listing_subunit);
+                        Some((sid, ticker, subunit))
+                    })
+                    .collect();
+                (jobs, unit_unknown)
             };
+            let mark_unit_unknown = || {
+                for ticker in &unit_unknown {
+                    mark_holding_stale(&holding_freshness, &ticker.to_uppercase());
+                }
+            };
+            let unit_notice = (!unit_unknown.is_empty())
+                .then(|| state::holdings_unit_unknown_notice(&unit_unknown));
             if jobs.is_empty() {
-                crate::wiring::dialog::refuse(&ui, state::MSG_HOLDINGS_REFRESH_NONE);
+                match unit_notice {
+                    Some(notice) => {
+                        mark_unit_unknown();
+                        refresh_holdings(
+                            &ui,
+                            &journal_state.borrow(),
+                            &holding_freshness.borrow(),
+                            &holding_dismissed.borrow(),
+                            config.borrow().number_format,
+                        );
+                        crate::wiring::dialog::refuse(&ui, &notice);
+                    }
+                    None => crate::wiring::dialog::refuse(&ui, state::MSG_HOLDINGS_REFRESH_NONE),
+                }
                 return;
             }
             // Story 6.9 (FR26): the PRICE fallback chain, resolved once and shared by every
@@ -1201,6 +1242,7 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
             // worker checks it per job, so it must read false for the new batch). Safe: the button is
             // disabled while `refreshing`, so a prior batch has fully drained before we get here.
             fetch_cancel.store(false, std::sync::atomic::Ordering::Relaxed);
+            mark_unit_unknown();
             // Count only jobs the worker actually accepted — if the worker is gone, don't latch
             // `refreshing` (which would disable the button for the rest of the session). (Issue #52.)
             let mut enqueued = 0usize;
@@ -1232,7 +1274,13 @@ pub(crate) fn wire_holdings(ui: &MainWindow, s: &Session) {
             *refresh_total.borrow_mut() = enqueued; // issue #100: the batch size, for the n/t counter
             holdings.set_refreshing(true);
             holdings.set_refresh_progress(format!("0 / {enqueued}").into());
-            holdings.set_notice(state::MSG_HOLDINGS_REFRESHING.into());
+            // PR #291 review: the tickers left out for an unknown unit are a FAILURE — it takes
+            // the slot in place of the in-flight banner and stays there (the F4 notice-slot rule:
+            // a later success never replaces it).
+            match unit_notice {
+                Some(notice) => holdings.set_notice(notice.into()),
+                None => holdings.set_notice(state::MSG_HOLDINGS_REFRESHING.into()),
+            }
         });
     }
     // ── Issue #100 — cancel the in-flight holdings price-refresh batch: raise the shared flag; the

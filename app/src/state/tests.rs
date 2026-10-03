@@ -11223,6 +11223,73 @@ mod currency_check {
         assert_eq!(state.get_study(id).unwrap().listing_subunit, None);
     }
 
+    // PR #291 review: a study kept in the hundredths code itself (GBX) is told the converted
+    // listing is in the major currency — never « en GBP, l'étude est en GBX ».
+    #[test]
+    fn a_study_in_the_hundredths_code_is_told_the_major_currency() {
+        let converted = FetchedFinancials {
+            native_currency: "GBP".to_string(),
+            listing_subunit: Some("GBX".to_string()),
+            ..fetched_in(&YEARS, "GBP")
+        };
+        for study_currency in ["GBX", "gbx"] {
+            assert_eq!(
+                crate::state::currency_refusal("ULVR.LSE", study_currency, &converted, true)
+                    .unwrap(),
+                "Le fournisseur cote ULVR.LSE en centièmes de devise (GBX) ; l'application \
+                 convertit ces cours en GBP (÷ 100) : la devise à retenir est GBP, pas GBX. Rien \
+                 n'a été appliqué."
+            );
+        }
+        // Any other currency keeps the ordinary mismatch wording.
+        let other = crate::state::currency_refusal("ULVR.LSE", "EUR", &converted, true).unwrap();
+        assert!(
+            other.starts_with("Le fournisseur donne ULVR.LSE en GBP"),
+            "{other}"
+        );
+    }
+
+    // PR #291 review: the holdings price-only refresh of a study never fetched, on a venue quoting
+    // in hundredths, has an UNKNOWN unit (its close may be pence) — not fetched, nothing applied.
+    #[test]
+    fn a_price_unit_is_unknown_only_for_a_never_fetched_study_on_a_hundredths_venue() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0xC4, "2026-10-01T09:00:00Z");
+        let lse = state.create_study("ULVR.LSE", "GBP").unwrap();
+        let study = state.get_study(lse).unwrap();
+        assert!(crate::state::price_unit_unknown(&study, "ULVR.LSE"));
+        assert!(crate::state::price_unit_unknown(&study, "ULVR.L"));
+        // Another venue (the ticker fetched decides): the close is applied as before.
+        assert!(!crate::state::price_unit_unknown(&study, "AAPL.US"));
+        assert!(!crate::state::price_unit_unknown(&study, "NESN.SW"));
+        // Fetched in pence: the unit is known (GBX, converted).
+        let converted = FetchedFinancials {
+            native_currency: "GBP".to_string(),
+            listing_subunit: Some("GBX".to_string()),
+            ..fetched_with_price(&YEARS, 45)
+        };
+        state.apply_provider_refresh(lse, &converted).unwrap();
+        assert!(!crate::state::price_unit_unknown(
+            &state.get_study(lse).unwrap(),
+            "ULVR.LSE"
+        ));
+        // Fetched and served in pounds: the record is cleared, yet the unit is known — the
+        // study holds provider figures (identity of origin, not the field's emptiness).
+        state
+            .apply_provider_refresh(lse, &fetched_in(&YEARS, "GBP"))
+            .unwrap();
+        let fetched = state.get_study(lse).unwrap();
+        assert_eq!(fetched.listing_subunit, None);
+        assert!(!crate::state::price_unit_unknown(&fetched, "ULVR.LSE"));
+        assert_eq!(
+            crate::state::holdings_unit_unknown_notice(&["ULVR.LSE".into(), "NPN.JSE".into()]),
+            "Prix non actualisé pour ULVR.LSE, NPN.JSE : la place cote souvent en centièmes de \
+             devise, et l'unité du fournisseur reste inconnue tant que l'étude liée n'a pas été \
+             récupérée une fois depuis le fournisseur (« ⤓ Récupérer (fournisseur) »). Rien n'a \
+             été appliqué."
+        );
+    }
+
     #[test]
     fn an_unconverted_hundredths_code_is_never_read_as_the_unit_currency() {
         // `GBp` (pence) is not `GBP` (pounds) — the case carries the meaning here.

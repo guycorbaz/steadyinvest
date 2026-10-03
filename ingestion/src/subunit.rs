@@ -12,8 +12,12 @@
 //!   capitalisation of a `GBX` line is in pounds; each statement row states its own
 //!   `currency_symbol`, read by the adapter): never divided. The per-share EPS, dividend and book
 //!   value are derived from the statements, so they are in the statements' currency already.
-//!   A statement amount that states no currency of its own keeps the listing code as its label,
-//!   so the existing « comptes publiés en … » warning names it — never silently relabelled.
+//!   A statement amount that states no currency of its own carries the listing code as its label
+//!   (the adapter's fallback): it is RELABELLED to the major currency, never divided — a figure
+//!   served in the major unit under the listing's label (PR #291 review). Left as `GBX`, it would
+//!   raise a spurious `currency_mismatch` and « comptes publiés en GBX, cotation en GBP ». That
+//!   the statements and the trailing EPS are in the major unit is the working assumption pending
+//!   a real fetch's verification (owner decision pending).
 //! - Twelve Data (`GBp`) serves prices only (no fundamentals on the free tier): converted.
 
 use rust_decimal::Decimal;
@@ -56,7 +60,9 @@ pub fn from_hundredths(price: Decimal) -> Option<Decimal> {
 
 /// PURE: converts the PRICE figures of a fetch quoted in hundredths — each year's high and low
 /// (those labelled with the listing code) and the latest close — and relabels the listing in the
-/// major currency. Returns the provider's original listing code when a conversion happened (the
+/// major currency. The statement amounts labelled with the listing code (a row that stated no
+/// currency of its own) are relabelled to the major currency WITHOUT dividing — fundamentals are
+/// served in the major unit. Returns the provider's original listing code when a conversion happened (the
 /// record the app keeps for the traceability), `None` otherwise (nothing touched).
 ///
 /// A price that cannot be stated in the major unit (`from_hundredths` → `None`) becomes absent.
@@ -76,9 +82,26 @@ pub(crate) fn convert_prices(
             });
         }
     };
+    let relabel = |amount: &mut Option<RawAmount>| {
+        if let Some(a) = amount.as_mut()
+            && a.currency.trim() == code
+        {
+            a.currency = major.to_string();
+        }
+    };
     for year in &mut financials.years {
         convert(&mut year.high_price);
         convert(&mut year.low_price);
+        for statement in [
+            &mut year.sales,
+            &mut year.eps,
+            &mut year.dividend_per_share,
+            &mut year.pre_tax_profit,
+            &mut year.net_profit,
+            &mut year.book_value_per_share,
+        ] {
+            relabel(statement);
+        }
     }
     *latest_price = latest_price.and_then(from_hundredths);
     financials.native_currency = major.to_string();
@@ -172,9 +195,9 @@ mod tests {
             assert_eq!(y.eps, amount("0.4512", "GBP"));
             assert_eq!(y.dividend_per_share, amount("0.15", "GBP"));
             assert_eq!(y.sales, amount("5000000000", "GBP"));
-            // A statement amount that stated no currency of its own keeps its label (named by
-            // the « comptes publiés en … » warning), never relabelled nor divided.
-            assert_eq!(y.book_value_per_share, amount("3.2", code));
+            // A statement amount that stated no currency of its own (labelled with the listing
+            // code) is relabelled to the major currency, never divided (PR #291 review).
+            assert_eq!(y.book_value_per_share, amount("3.2", major), "{code}");
         }
     }
 

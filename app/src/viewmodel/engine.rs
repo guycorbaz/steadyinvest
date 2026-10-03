@@ -910,16 +910,13 @@ fn trace_price(j: &steadyinvest_contract::Judgment, format: NumberFormat) -> Str
 /// Owner decision 2026-10-01: the line that names a listing the provider quotes in a currency's
 /// hundredths (`GBX`…) — its fetched prices (yearly high / low, latest close) were divided by 100
 /// at the fetch into the study's currency. `None` when the last fetch served the prices as is.
+/// The wording is the report's `LISTING_SUBUNIT_LINE` (PR #291 review: one line for the trace, the
+/// study PDF and the quick screen; its neutrality is scanned with the report's strings).
 fn trace_listing_subunit(study: &Study) -> Option<String> {
-    let code = study.listing_subunit.as_deref()?.trim();
-    if code.is_empty() {
-        return None;
-    }
-    Some(TRACE_LISTING_SUBUNIT.replacen("{}", code, 1).replacen(
-        "{}",
-        study.native_currency.trim(),
-        1,
-    ))
+    steadyinvest_report::listing_subunit_note(
+        study.listing_subunit.as_deref(),
+        &study.native_currency,
+    )
 }
 
 /// The yearly data's provenance in one line (FR11): how many filled cells came from the provider
@@ -1241,9 +1238,6 @@ pub const TRACE_YEARLY_STALE: &str = "dont {} périmée(s)";
 pub const TRACE_YEARLY_TYPED: &str = "{} cellule(s) manuelle(s)";
 pub const TRACE_YEARLY_DERIVED: &str = "{} cellule(s) calculée(s)";
 pub const TRACE_YEARLY_AI: &str = "{} cellule(s) proposée(s) par l'IA et validée(s)";
-/// Owner decision 2026-10-01: a listing quoted in hundredths, converted at the fetch.
-pub const TRACE_LISTING_SUBUNIT: &str =
-    "Cotation du fournisseur en {} (centièmes) : cours récupérés convertis en {} (÷ 100)";
 pub const TRACE_RULE_PREFIX: &str = "Méthode";
 pub const TRACE_VERDICT_FORMULA: &str = "zones §4 + ratio H/B + appréciation §5";
 /// The FR8 low-confidence reason carried onto the verdict surface (Story 2.7, AC1). Fact-stating,
@@ -1293,7 +1287,6 @@ pub const USER_FACING_LABELS: &[&str] = &[
     TRACE_YEARLY_TYPED,
     TRACE_YEARLY_DERIVED,
     TRACE_YEARLY_AI,
-    TRACE_LISTING_SUBUNIT,
     TRACE_RULE_PREFIX,
     TRACE_VERDICT_FORMULA,
     CONFIDENCE_LOW,

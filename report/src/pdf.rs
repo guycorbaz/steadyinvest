@@ -870,6 +870,13 @@ fn price_earnings_section(
     if let Some(origin) = price_origin_line(study) {
         notes.small_line(&origin);
     }
+    // PR #291 review: a listing the provider quotes in hundredths (GBX…) names its conversion
+    // beside the price origin — the same line as the verdict traceability.
+    if let Some(line) =
+        listing_subunit_note(study.listing_subunit.as_deref(), &study.native_currency)
+    {
+        notes.small_line(&line);
+    }
     let body_refs: Vec<Vec<&str>> = body
         .iter()
         .map(|r| r.iter().map(String::as_str).collect())
@@ -1439,6 +1446,27 @@ fn price_origin_line(study: &Study) -> Option<String> {
     };
     Some(format!("{PRICE_ORIGIN} {what}{stale}"))
 }
+/// Owner decision 2026-10-01 (PR #291): the line naming a listing the provider quotes in a
+/// currency's hundredths — its fetched prices were divided by 100 into the major currency. ONE
+/// wording for the verdict traceability (the app's `TRACE_LISTING_SUBUNIT`), the study PDF and the
+/// quick screen (screen and PDF). `{}` = the provider's code, then the major currency.
+pub const LISTING_SUBUNIT_LINE: &str =
+    "Cotation du fournisseur en {} (centièmes) : cours récupérés convertis en {} (÷ 100)";
+
+/// The [`LISTING_SUBUNIT_LINE`] for the provider's hundredths code `subunit` (`GBX`…) converted
+/// into `major` — `None` when no conversion happened (no code, or a blank one).
+pub fn listing_subunit_note(subunit: Option<&str>, major: &str) -> Option<String> {
+    let code = subunit?.trim();
+    if code.is_empty() {
+        return None;
+    }
+    Some(
+        LISTING_SUBUNIT_LINE
+            .replacen("{}", code, 1)
+            .replacen("{}", major.trim(), 1),
+    )
+}
+
 const PRICE_ORIGIN: &str = "Origine du cours actuel :";
 const PRICE_FROM_SESSION: &str = "fournisseur, séance du {}";
 const PRICE_FETCHED_ON: &str = "fournisseur, récupéré le {}";
@@ -1640,6 +1668,7 @@ const REPORT_USER_FACING: &[&str] = &[
     "valeur relative :",
     "Cours actuel :",
     PRICE_ORIGIN,
+    LISTING_SUBUNIT_LINE,
     PRICE_FROM_SESSION,
     PRICE_FETCHED_ON,
     PRICE_TYPED_ON,
@@ -5270,5 +5299,20 @@ mod tests {
             &bytes,
             "Origine du cours actuel : manuel, saisi le 01/10/2026"
         ));
+    }
+
+    // PR #291 review: a listing converted from hundredths is named beside the price origin.
+    #[test]
+    fn a_listing_converted_from_hundredths_is_named() {
+        let mut study = demo_study();
+        let line = "Cotation du fournisseur en GBX (centièmes) : cours récupérés convertis en";
+        let bytes = render_study_pdf(&study, NumberStyle::Comma).unwrap();
+        assert!(!contains(&bytes, line), "nothing converted, nothing named");
+        study.native_currency = "GBP".to_string();
+        study.listing_subunit = Some("GBX".to_string());
+        let bytes = render_study_pdf(&study, NumberStyle::Comma).unwrap();
+        assert!(contains(&bytes, &format!("{line} GBP (÷ 100)")));
+        assert_eq!(listing_subunit_note(Some(" "), "GBP"), None);
+        assert_eq!(listing_subunit_note(None, "GBP"), None);
     }
 }

@@ -502,6 +502,38 @@ pub(crate) fn provider_figure_predates_method(cell: &Cell) -> bool {
         && steadyinvest_core::predates_inputs_definition(fetched_under(&cell.provenance))
 }
 
+/// PR #291 review (owner decision 2026-10-01 — hundredths converted): is the UNIT of a price-only
+/// quote of `ticker` (linked to `study`) unknown? The bare `/eod` or `/price` close states no
+/// currency, so only the study's last fetch can say whether the provider quotes it in hundredths
+/// (`listing_subunit` = `GBX`…, converted) or as is. `listing_subunit` = `None` means two things —
+/// « served as is » or « never fetched » — told apart by IDENTITY of origin, not by the field's
+/// emptiness (the discriminator rule): a study that holds a provider-sourced yearly cell was
+/// fetched, so its `None` is « as is ». Unknown = never fetched (typed, from an AI draft) AND the
+/// ticker sits on a venue that quotes in hundredths (London, Johannesburg, Tel Aviv): the raw
+/// close may be pence — never applied as pounds (wrong §4 zone, a stop ratcheted ×100 that never
+/// comes down, a polluted price history). Any other venue: the close is applied as before.
+pub fn price_unit_unknown(study: &Study, ticker: &str) -> bool {
+    if study.listing_subunit.is_some() || !steadyinvest_ingestion::ticker::hundredths_venue(ticker)
+    {
+        return false;
+    }
+    let fetched_once = study.years.iter().any(|y| {
+        [&y.sales, &y.eps, &y.high_price, &y.low_price]
+            .into_iter()
+            .chain(
+                [
+                    y.dividend_per_share.as_ref(),
+                    y.pre_tax_profit.as_ref(),
+                    y.book_value_per_share.as_ref(),
+                ]
+                .into_iter()
+                .flatten(),
+            )
+            .any(|c| c.source == Source::Provider || c.pending.is_some())
+    });
+    !fetched_once
+}
+
 /// Issue #252: how many provider figures of `study` predate today's definition of the inputs — the
 /// count the open study states, so the user knows a fetch may change them for that reason.
 pub fn provider_figures_predating_method(study: &Study) -> usize {

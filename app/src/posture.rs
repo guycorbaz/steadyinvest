@@ -1021,8 +1021,11 @@ mod tests {
             // G3 catch-up of #267–#270: a year with only divergences left (MSG_YEAR_ONLY_LEFT):
             // 260 + 1 = 261, measured.
             // Owner decision 2026-10-01: a listing in hundredths is converted at the fetch, no
-            // longer refused (MSG_CURRENCY_SUBUNIT removed): 261 − 1 = 260, measured.
-            260,
+            // longer refused (MSG_CURRENCY_SUBUNIT removed): 261 − 1 = 260, measured. Its PR #291
+            // review: a holdings price of unknown unit on a hundredths venue is refused
+            // (MSG_HOLDINGS_UNIT_UNKNOWN), a study kept in the hundredths code is told the major
+            // currency (MSG_CURRENCY_SUBUNIT_EXPECTED): 260 + 2 = 262, measured.
+            262,
             // integ/g1-a-to-h: A 142 + C 1 + E 6 + H 4 = 153, measured; + I 4 = 157, measured.
             // The I on-screen check names an ambiguous size-table field (MSG_SIZE_FIELD_AMBIGUOUS,
             // issue #96): 157 + 1 = 158, measured. The G1 final review of the study PDF export
@@ -1102,8 +1105,10 @@ mod tests {
             // the stale and calculated cells counted apart: 34 + 2 = 36.
             // FR7 (2026-10-01): « aucun » of the study's quality-flags line: 36 + 1 = 37.
             // Owner decision 2026-10-01: the traceability line of a listing converted from
-            // hundredths (TRACE_LISTING_SUBUNIT): 37 + 1 = 38, measured.
-            38,
+            // hundredths (TRACE_LISTING_SUBUNIT): 37 + 1 = 38, measured. Its PR #291 review: the
+            // line is defined once in the report (LISTING_SUBUNIT_LINE, scanned with the report's
+            // strings — the study PDF and the quick screen print it too): 38 − 1 = 37, measured.
+            37,
             "engine.rs label inventory changed — register the new label"
         );
     }

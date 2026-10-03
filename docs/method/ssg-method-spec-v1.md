@@ -272,10 +272,20 @@ ZAc → ZAR; ILA → ILS — exact codes, the case carries the meaning) is **con
 the price-only holdings close — is divided by 100 exactly (decimal, never rounded), the listing
 currency becomes the major one, and the provider's code is recorded on the study and named in the
 traceability. Statement figures (sales, EPS, dividend and book value per share, trailing EPS) are
-served in the major currency and are never divided. Statements **reported** in another currency
-than the listing are **applied with a named warning**, per the rule above (réconcilié 2026-10-01 :
-PR #277 ; conversion des centièmes, décision Guy 2026-10-01). Décision en attente (Guy) : comptes
-publiés dans une autre devise que la cotation — avertir (état actuel) ou bloquer.
+taken to be served in the major currency and are never divided; a statement amount that states no
+currency of its own is labelled in the major currency, not in the hundredths code (réconcilié
+2026-10-03 : revue PR #291). Décision en attente (Guy) : que les états financiers et le BPA sur
+douze mois d'une cotation en centièmes soient bien servis dans la devise principale est une
+hypothèse, à vérifier sur une récupération réelle. The price-only refresh of a holding converts its
+close when the study's last fetch recorded the hundredths code; when the unit is **unknown** — the
+linked study was never fetched from the provider (typed, from an AI draft) and its venue quotes in
+hundredths (London, Johannesburg, Tel Aviv) — the close is **refused**, named, and nothing is
+applied (no price, no trailing-stop ratchet, no price history) until the study is fetched once; a
+study in the hundredths code itself (`GBX`) is told the major currency it belongs in (réconcilié
+2026-10-03 : revue PR #291). Statements **reported** in another currency than the listing are
+**applied with a named warning**, per the rule above (réconcilié 2026-10-01 : PR #277 ; conversion
+des centièmes, décision Guy 2026-10-01). Décision en attente (Guy) : comptes publiés dans une autre
+devise que la cotation — avertir (état actuel) ou bloquer.
 
 **`split_series_break` — normative detection rule** *(absorbed at ssg-1.1.0; quantifies
 "inconsistent with sales")*:
