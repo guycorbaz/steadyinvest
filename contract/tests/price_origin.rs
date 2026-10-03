@@ -35,12 +35,14 @@ fn a_recorded_origin_round_trips_and_an_absent_one_is_not_written() {
             at: Timestamp("2026-10-01T09:00:00Z".to_string()),
             session_date: Some("2026-09-30".to_string()),
             freshness: Freshness::Stale,
+            aged: false,
         },
         PriceOrigin {
             source: Source::Manual,
             at: Timestamp("2026-10-01T10:00:00Z".to_string()),
             session_date: None,
             freshness: Freshness::Current,
+            aged: false,
         },
     ] {
         s.judgment.current_price_origin = Some(origin);

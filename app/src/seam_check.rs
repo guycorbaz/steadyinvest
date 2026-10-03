@@ -90,7 +90,13 @@ mod tests {
             .collect();
         study.judgment = Judgment {
             ai_placed: Default::default(),
-            current_price_origin: None,
+            current_price_origin: Some(steadyinvest_contract::PriceOrigin {
+                source: steadyinvest_contract::Source::Manual,
+                at: steadyinvest_contract::Timestamp("2026-03-09T09:30:00Z".to_string()),
+                session_date: None,
+                freshness: steadyinvest_contract::Freshness::Current,
+                aged: false,
+            }),
             estimated_high_eps: Some(money("2.00")),
             estimated_low_eps: Some(money("1.50")),
             projected_sales_growth_pct: None,

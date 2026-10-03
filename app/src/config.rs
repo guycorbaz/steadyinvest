@@ -238,6 +238,19 @@ pub struct AppConfig {
     /// with `None` (the MCP server then falls back to `journal_path`).
     #[serde(default)]
     pub last_opened_path: Option<PathBuf>,
+    /// The current price's **age horizon** in trading days (FR23, PRD Appendix A — owner decision
+    /// 2026-10-01): a price older than this many trading days (Monday–Friday) is stale, the
+    /// verdict provisional. `None` = the pinned default (1). Append-only `#[serde(default)]`; a
+    /// string like the other Réglages numbers so a hand-edited value never breaks the whole file;
+    /// read through [`AppConfig::price_stale_after_or_default`] (validate before trust).
+    #[serde(default)]
+    pub price_stale_after_trading_days: Option<String>,
+}
+
+/// Whether `s` is a valid price age horizon: a whole number of trading days in `1..=260` (FR23).
+/// The ONE validation shared by the config accessor and the Réglages handler.
+pub fn is_valid_price_stale_after(s: &str) -> bool {
+    steadyinvest_report::price_age::parse_horizon(s).is_some()
 }
 
 /// Whether `s` is a well-formed trailing-stop percentage: an exact decimal strictly inside `(0, 100)`
@@ -302,6 +315,7 @@ impl Default for AppConfig {
             fundamentals_fallback_provider: None,
             fx_fallback_provider: None,
             last_opened_path: None,
+            price_stale_after_trading_days: None,
         }
     }
 }
@@ -378,6 +392,14 @@ impl AppConfig {
             .filter(|s| is_valid_withholding_rate_pct(s))
             .map(str::to_string)
             .unwrap_or_else(|| DEFAULT_WITHHOLDING_RATE_PCT.to_string())
+    }
+
+    /// The current price's age horizon in trading days (FR23): the persisted value when it is a
+    /// whole number in `1..=260`, else the default (1 — « older than one trading day »).
+    pub fn price_stale_after_or_default(&self) -> u32 {
+        steadyinvest_report::price_age::horizon_or_default(
+            self.price_stale_after_trading_days.as_deref(),
+        )
     }
 
     /// The concentration threshold in percent (Story 6.7, FR45): the persisted value when it is
@@ -639,6 +661,7 @@ mod tests {
             size_target_medium_pct: Some("40".to_string()),
             size_target_large_pct: Some("30".to_string()),
             last_opened_path: Some(PathBuf::from("/tmp/steadyinvest/journal.db")),
+            price_stale_after_trading_days: Some("3".to_string()),
         };
         save(&path, &config).unwrap();
         let loaded = load(&path);
@@ -1062,6 +1085,29 @@ mod tests {
     }
 
     // ── Story 6.7 (FR45) — concentration threshold + diversify-by-size table ──
+
+    #[test]
+    fn price_stale_after_defaults_to_one_trading_day_and_validates() {
+        // FR23 (owner decision 2026-10-01): absent from an older config → 1.
+        let older: AppConfig = serde_json::from_str(r#"{ "theme": "light" }"#).unwrap();
+        assert_eq!(older.price_stale_after_trading_days, None);
+        assert_eq!(older.price_stale_after_or_default(), 1);
+        let mut c = AppConfig {
+            price_stale_after_trading_days: Some(" 3 ".to_string()),
+            ..AppConfig::default()
+        };
+        assert_eq!(c.price_stale_after_or_default(), 3, "trimmed");
+        for damaged in ["0", "261", "1.5", "-2", "trois", ""] {
+            c.price_stale_after_trading_days = Some(damaged.to_string());
+            assert_eq!(c.price_stale_after_or_default(), 1, "{damaged}");
+        }
+        assert!(is_valid_price_stale_after("260"));
+        assert!(!is_valid_price_stale_after("0"));
+        // Round-trips through the file as written.
+        c.price_stale_after_trading_days = Some("2".to_string());
+        let back: AppConfig = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+        assert_eq!(back.price_stale_after_or_default(), 2);
+    }
 
     #[test]
     fn concentration_threshold_validates_and_falls_back_on_damage() {

@@ -31,6 +31,7 @@ use steadyinvest_core::normalize::{self, Finding, PlausibilityKey};
 use steadyinvest_core::rounding::DisplayField;
 use steadyinvest_core::ssg::{CalcFinding, ReturnOutputs, SsgOutputs, Trend, UpsideDownside, Zone};
 use steadyinvest_core::verdict::{GateState, GatedInput, OpenGate, StudySnapshot, Verdict};
+use steadyinvest_report::price_age::DayZone;
 
 use crate::viewmodel::entry;
 use crate::viewmodel::form::EMPTY_SLOT;
@@ -697,7 +698,7 @@ pub fn verdict_badge(
     let open_gates: Vec<slint::SharedString> = verdict
         .open_gates()
         .iter()
-        .map(|g| open_gate_label(g).into())
+        .map(|g| open_gate_label(g, study).into())
         .collect();
     // The FR8 low-confidence reason, carried as explicit text ON the verdict surface (AC1) — it shows
     // whenever fewer than five usable years exist, independent of the Provisional/Withheld split, and
@@ -782,10 +783,18 @@ pub fn scenario_compare(
 
 /// The traceability surface for the verdict (AC 7): the judgment inputs it descends from with their
 /// provenance, the method identity + a formula caption, and (for a degraded verdict) the open gates.
-pub fn verdict_trace(study: &Study, snapshot: &StudySnapshot, format: NumberFormat) -> TraceState {
+///
+/// `zone` is the zone the price origin's date is shown in — the clock's, the one the price age is
+/// counted in (owner decision D, Guy 2026-10-03), so the shown day never contradicts the age.
+pub fn verdict_trace(
+    study: &Study,
+    snapshot: &StudySnapshot,
+    format: NumberFormat,
+    zone: DayZone,
+) -> TraceState {
     let verdict = snapshot.verdict();
     let j = &study.judgment;
-    let inputs: Vec<slint::SharedString> = vec![
+    let mut inputs: Vec<slint::SharedString> = vec![
         trace_input(
             LBL_EST_HIGH_EPS,
             j.estimated_high_eps,
@@ -818,13 +827,16 @@ pub fn verdict_trace(study: &Study, snapshot: &StudySnapshot, format: NumberForm
             j.ai_placed.judged_avg_low_pe.as_ref(),
         )
         .into(),
-        trace_price(j, format).into(),
+        trace_price(j, format, zone).into(),
         trace_yearly(study).into(),
     ];
+    if let Some(line) = trace_listing_subunit(study) {
+        inputs.push(line.into());
+    }
     let open_gates: Vec<slint::SharedString> = verdict
         .open_gates()
         .iter()
-        .map(|g| open_gate_label(g).into())
+        .map(|g| open_gate_label(g, study).into())
         .collect();
     TraceState {
         visible: true,
@@ -873,35 +885,58 @@ fn trace_date(stamp: &str) -> String {
 
 /// The current price's traceability line (Guy's on-screen test 2026-10-01, FR11): its real
 /// origin — the provider with its session date (or fetch date), the owner's typing, or unknown —
-/// and « périmé » after a failed refresh. Never « manuel » for a fetched price.
-fn trace_price(j: &steadyinvest_contract::Judgment, format: NumberFormat) -> String {
-    use steadyinvest_contract::{Freshness, Source};
+/// and « périmé » after a failed refresh or past the age horizon (FR23, marked at read time —
+/// `report::price_age`); with no recorded origin, or one whose date cannot be read, « date
+/// inconnue » (owner decision C, 2026-10-03 — the verdict's open gate names it the same way). The
+/// date shown is the day the age counts from, read in `zone` (owner decision D: the local day —
+/// `price_age::price_date_shown`); a session date is shown as given. Never « manuel » for a
+/// fetched price.
+fn trace_price(j: &steadyinvest_contract::Judgment, format: NumberFormat, zone: DayZone) -> String {
+    use steadyinvest_contract::Source;
+    use steadyinvest_report::price_age::price_date_shown;
     let shown = match j.current_price {
         Some(m) => format_scaled(m.as_decimal(), DisplayField::Price, format),
         None => return format!("{LBL_CURRENT_PRICE} : {EMPTY_SLOT}"),
     };
+    let unrecorded = || format!("{TRACE_ORIGIN_UNKNOWN} — {GATE_UNKNOWN_DATE}");
     let origin = match &j.current_price_origin {
-        None => TRACE_ORIGIN_UNKNOWN.to_string(),
-        Some(o) => {
-            let base = match (o.source, &o.session_date) {
-                (Source::Provider, Some(session)) => {
-                    TRACE_PRICE_PROVIDER_SESSION.replace("{}", &trace_date(session))
-                }
-                (Source::Provider, None) => {
-                    TRACE_PRICE_PROVIDER_AT.replace("{}", &trace_date(&o.at.0))
-                }
-                (Source::Manual, _) => TRACE_PRICE_TYPED.replace("{}", &trace_date(&o.at.0)),
+        None => unrecorded(),
+        Some(o) => match price_date_shown(o, zone) {
+            // The date cannot be read: an unknown date, like a missing origin — its source named.
+            None => match o.source {
+                Source::Provider => format!("{TRACE_PRICE_PROVIDER} — {GATE_UNKNOWN_DATE}"),
+                Source::Manual => format!("{PROVENANCE_MANUAL} — {GATE_UNKNOWN_DATE}"),
                 // A price is never derived — never passed off as typed either (G3 review).
-                (Source::Derived, _) => TRACE_ORIGIN_UNKNOWN.to_string(),
-            };
-            if o.freshness == Freshness::Stale {
-                format!("{base} — {GATE_STALE}")
-            } else {
-                base
+                Source::Derived => unrecorded(),
+            },
+            Some(day) => {
+                let base = match (o.source, &o.session_date) {
+                    (Source::Provider, Some(_)) => TRACE_PRICE_PROVIDER_SESSION.replace("{}", &day),
+                    (Source::Provider, None) => TRACE_PRICE_PROVIDER_AT.replace("{}", &day),
+                    (Source::Manual, _) => TRACE_PRICE_TYPED.replace("{}", &day),
+                    (Source::Derived, _) => unrecorded(),
+                };
+                if o.is_stale() {
+                    format!("{base} — {GATE_STALE}")
+                } else {
+                    base
+                }
             }
-        }
+        },
     };
     format!("{LBL_CURRENT_PRICE} : {shown} ({origin})")
+}
+
+/// Owner decision 2026-10-01: the line that names a listing the provider quotes in a currency's
+/// hundredths (`GBX`…) — its fetched prices (yearly high / low, latest close) were divided by 100
+/// at the fetch into the study's currency. `None` when the last fetch served the prices as is.
+/// The wording is the report's `LISTING_SUBUNIT_LINE` (PR #291 review: one line for the trace, the
+/// study PDF and the quick screen; its neutrality is scanned with the report's strings).
+fn trace_listing_subunit(study: &Study) -> Option<String> {
+    steadyinvest_report::listing_subunit_note(
+        study.listing_subunit.as_deref(),
+        &study.native_currency,
+    )
 }
 
 /// The yearly data's provenance in one line (FR11): how many filled cells came from the provider
@@ -1049,13 +1084,18 @@ pub fn forecast_low_option_from_key(key: &str) -> Option<CForecastLowOption> {
 
 /// What keeps the verdict from being full (Story 8.8, « Valider l'étude »): `None` for a Full
 /// verdict; else the open inputs' labels (« BPA 2023 — non validé », …) joined by « , » — or, a
-/// low-confidence study having no open input, its low-confidence label (Decision 5).
-pub fn open_inputs(snapshot: &StudySnapshot) -> Option<String> {
+/// low-confidence study having no open input, its low-confidence label (Decision 5). `study` is the
+/// read the snapshot was built from (it names a price of unknown date — [`open_gate_label`]).
+pub fn open_inputs(snapshot: &StudySnapshot, study: &Study) -> Option<String> {
     let verdict = snapshot.verdict();
     if matches!(verdict, Verdict::Full(_)) {
         return None;
     }
-    let list: Vec<String> = verdict.open_gates().iter().map(open_gate_label).collect();
+    let list: Vec<String> = verdict
+        .open_gates()
+        .iter()
+        .map(|g| open_gate_label(g, study))
+        .collect();
     Some(if list.is_empty() {
         CONFIDENCE_LOW.to_string()
     } else {
@@ -1064,13 +1104,29 @@ pub fn open_inputs(snapshot: &StudySnapshot) -> Option<String> {
 }
 
 /// One open-gate → a fact-stating French line: "<input label> — <state noun>" (e.g. "BPA 2023 —
-/// non validé"). Neutral nouns only (scanned in [`USER_FACING_LABELS`]).
-fn open_gate_label(gate: &OpenGate) -> String {
+/// non validé"). Neutral nouns only (scanned in [`USER_FACING_LABELS`]). The current price's
+/// stale gate is « date inconnue » when the read `study`'s price has no recorded origin (owner
+/// decision C, 2026-10-03 — keyed by that identity, `price_age::current_price_age`, never by the
+/// gate's position), « périmé » otherwise.
+fn open_gate_label(gate: &OpenGate, study: &Study) -> String {
+    use steadyinvest_report::price_age::{PriceAge, current_price_age};
     let input_label = match &gate.input {
         GatedInput::YearField { year, field } => format!("{} {year}", gate_field_label(field)),
         GatedInput::JudgmentInput { name } => gate_judgment_label(name).to_string(),
     };
-    format!("{input_label} — {}", gate_state_noun(gate.state))
+    let unknown_price_date = matches!(
+        gate.input,
+        GatedInput::JudgmentInput {
+            name: "current_price"
+        }
+    ) && gate.state == GateState::Stale
+        && current_price_age(&study.judgment) == Some(PriceAge::UnknownDate);
+    let noun = if unknown_price_date {
+        GATE_UNKNOWN_DATE
+    } else {
+        gate_state_noun(gate.state)
+    };
+    format!("{input_label} — {noun}")
 }
 
 /// The fact-stating French noun for a non-green gate state (the `OpenGate.state` is never
@@ -1203,6 +1259,9 @@ pub const GATE_NON_GREEN: &str = "à reprendre";
 pub const GATE_MISSING: &str = "manquant";
 pub const GATE_NOT_VALIDATED: &str = "non validé";
 pub const GATE_STALE: &str = "périmé";
+/// A current price with no recorded origin (owner decision C, Guy 2026-10-03): its date is
+/// unknown — stale for the verdict, named apart from « périmé ».
+pub const GATE_UNKNOWN_DATE: &str = "date inconnue";
 pub const TREND_UP: &str = "hausse";
 pub const TREND_EVEN: &str = "stable";
 pub const TREND_DOWN: &str = "baisse";
@@ -1215,6 +1274,9 @@ pub const FLAGS_NONE: &str = "aucun";
 pub const TRACE_PRICE_PROVIDER_SESSION: &str = "fournisseur, séance du {}";
 pub const TRACE_PRICE_PROVIDER_AT: &str = "fournisseur, récupéré le {}";
 pub const TRACE_PRICE_TYPED: &str = "manuel, saisi le {}";
+/// A fetched price whose date cannot be read (owner decision C, 2026-10-03): « fournisseur — date
+/// inconnue ».
+pub const TRACE_PRICE_PROVIDER: &str = "fournisseur";
 pub const TRACE_ORIGIN_UNKNOWN: &str = "origine non enregistrée";
 pub const TRACE_AI_VALIDATED: &str = "proposé par l'IA, validé le {}";
 pub const TRACE_YEARLY: &str = "Données annuelles";
@@ -1255,6 +1317,7 @@ pub const USER_FACING_LABELS: &[&str] = &[
     GATE_MISSING,
     GATE_NOT_VALIDATED,
     GATE_STALE,
+    GATE_UNKNOWN_DATE,
     TREND_UP,
     TREND_EVEN,
     TREND_DOWN,
@@ -1264,6 +1327,7 @@ pub const USER_FACING_LABELS: &[&str] = &[
     TRACE_PRICE_PROVIDER_SESSION,
     TRACE_PRICE_PROVIDER_AT,
     TRACE_PRICE_TYPED,
+    TRACE_PRICE_PROVIDER,
     TRACE_ORIGIN_UNKNOWN,
     TRACE_AI_VALIDATED,
     TRACE_YEARLY,
@@ -1345,7 +1409,13 @@ mod tests {
     fn full_judgment() -> Judgment {
         Judgment {
             ai_placed: Default::default(),
-            current_price_origin: None,
+            current_price_origin: Some(steadyinvest_contract::PriceOrigin {
+                source: steadyinvest_contract::Source::Manual,
+                at: steadyinvest_contract::Timestamp("2026-03-09T09:30:00Z".to_string()),
+                session_date: None,
+                freshness: steadyinvest_contract::Freshness::Current,
+                aged: false,
+            }),
             estimated_high_eps: Some(money("8")),
             estimated_low_eps: Some(money("3")),
             projected_sales_growth_pct: Some(money("10")),
@@ -1646,6 +1716,46 @@ mod tests {
         )));
     }
 
+    /// PR #292 × PR #293: the dashboard's « — » rule keys on `study_incomplete` (a MISSING gate).
+    /// A price of unknown date (no recorded origin) or past the age horizon is gate `Stale` — the
+    /// verdict provisional, the study NOT incomplete — so its U/D ratio and potential stay listed.
+    /// Only an absent price withholds and counts as incomplete.
+    #[test]
+    fn a_stale_or_undated_price_is_provisional_not_incomplete() {
+        let years: Vec<YearData> = (2021..=2025).map(|y| year(y, validated_cell)).collect();
+        let mut undated = full_judgment();
+        undated.current_price_origin = None;
+        let mut aged = full_judgment();
+        if let Some(o) = aged.current_price_origin.as_mut() {
+            o.aged = true;
+        }
+        for judgment in [undated, aged] {
+            let snap = build_snapshot(&study_with(years.clone(), judgment)).unwrap();
+            assert!(
+                matches!(snap.verdict(), Verdict::Provisional(_)),
+                "a stale/undated price is provisional, got {:?}",
+                snap.verdict()
+            );
+            assert!(!study_incomplete(&snap), "a stale price is nothing to fill");
+            assert!(
+                matches!(
+                    snap.outputs().risk_reward.upside_downside,
+                    UpsideDownside::Ratio(_)
+                ),
+                "the U/D ratio is still computed for a provisional study"
+            );
+        }
+        let absent = Judgment {
+            current_price: None,
+            ..full_judgment()
+        };
+        let snap = build_snapshot(&study_with(years, absent)).unwrap();
+        assert!(
+            study_incomplete(&snap),
+            "an absent price is an input to fill"
+        );
+    }
+
     /// Issue #114: `required_judgment_fields` maps the verdict's OPEN judgment gates to their
     /// `JudgmentField` keys, so the form highlights exactly the inputs to fill. A missing
     /// `current_price` surfaces as the `"current_price"` field-key; a field that IS filled never
@@ -1903,7 +2013,7 @@ mod tests {
             },
         );
         let snap = build_snapshot(&withheld).unwrap();
-        let trace = verdict_trace(&withheld, &snap, NumberFormat::Comma);
+        let trace = verdict_trace(&withheld, &snap, NumberFormat::Comma, DayZone::UTC);
         assert!(trace.visible);
         assert_eq!(
             trace.inputs.row_count(),
@@ -2208,29 +2318,122 @@ mod tests {
             at: at.clone(),
             session_date: session.map(str::to_string),
             freshness,
+            aged: false,
         };
         j.current_price_origin = Some(o(Source::Provider, Some("2026-09-30"), Freshness::Current));
         assert_eq!(
-            trace_price(&j, NumberFormat::Comma),
+            trace_price(&j, NumberFormat::Comma, DayZone::UTC),
             "Prix actuel : 227,21 (fournisseur, séance du 30/09/2026)"
         );
         j.current_price_origin = Some(o(Source::Provider, None, Freshness::Stale));
         assert_eq!(
-            trace_price(&j, NumberFormat::Comma),
+            trace_price(&j, NumberFormat::Comma, DayZone::UTC),
             "Prix actuel : 227,21 (fournisseur, récupéré le 01/10/2026 — périmé)"
         );
         j.current_price_origin = Some(o(Source::Manual, None, Freshness::Current));
         assert_eq!(
-            trace_price(&j, NumberFormat::Comma),
+            trace_price(&j, NumberFormat::Comma, DayZone::UTC),
             "Prix actuel : 227,21 (manuel, saisi le 01/10/2026)"
         );
         j.current_price_origin = None;
         assert_eq!(
-            trace_price(&j, NumberFormat::Comma),
-            "Prix actuel : 227,21 (origine non enregistrée)"
+            trace_price(&j, NumberFormat::Comma, DayZone::UTC),
+            "Prix actuel : 227,21 (origine non enregistrée — date inconnue)"
+        );
+        // Owner decision C (2026-10-03): an origin whose date cannot be read is an unknown date,
+        // like a missing one — its source still named.
+        let unreadable = |source, at: &str, session: Option<&str>| PriceOrigin {
+            source,
+            at: Timestamp(at.to_string()),
+            session_date: session.map(str::to_string),
+            freshness: Freshness::Current,
+            aged: false,
+        };
+        j.current_price_origin = Some(unreadable(Source::Manual, "garbage", None));
+        assert_eq!(
+            trace_price(&j, NumberFormat::Comma, DayZone::UTC),
+            "Prix actuel : 227,21 (manuel — date inconnue)"
+        );
+        j.current_price_origin = Some(unreadable(
+            Source::Provider,
+            "2026-10-01T09:00:00Z",
+            Some("not-a-date"),
+        ));
+        assert_eq!(
+            trace_price(&j, NumberFormat::Comma, DayZone::UTC),
+            "Prix actuel : 227,21 (fournisseur — date inconnue)"
+        );
+        j.current_price_origin = Some(unreadable(Source::Derived, "2026-10-01T09:00:00Z", None));
+        assert_eq!(
+            trace_price(&j, NumberFormat::Comma, DayZone::UTC),
+            "Prix actuel : 227,21 (origine non enregistrée — date inconnue)"
         );
         j.current_price = None;
-        assert_eq!(trace_price(&j, NumberFormat::Comma), "Prix actuel : —");
+        assert_eq!(
+            trace_price(&j, NumberFormat::Comma, DayZone::UTC),
+            "Prix actuel : —"
+        );
+    }
+
+    // Owner decision D (Guy 2026-10-03): the origin's date is the LOCAL day the age counts from,
+    // read in the clock's zone — fixed offsets here, never the machine's zone.
+    #[test]
+    fn the_trace_shows_the_origin_date_in_the_local_day() {
+        use steadyinvest_contract::PriceOrigin;
+        let mut j = full_judgment();
+        j.current_price = Some(money("227.21"));
+        let zurich = DayZone::FixedSecondsEast(2 * 3600);
+        let new_york = DayZone::FixedSecondsEast(-4 * 3600);
+        let o = |source, at: &str, session: Option<&str>| PriceOrigin {
+            source,
+            at: Timestamp(at.to_string()),
+            session_date: session.map(str::to_string),
+            freshness: Freshness::Current,
+            aged: false,
+        };
+        // Typed at 00:30 in Zurich on 2 October = 22:30 UTC on 1 October.
+        j.current_price_origin = Some(o(Source::Manual, "2026-10-01T22:30:00Z", None));
+        assert_eq!(
+            trace_price(&j, NumberFormat::Comma, zurich),
+            "Prix actuel : 227,21 (manuel, saisi le 02/10/2026)"
+        );
+        assert_eq!(
+            trace_price(&j, NumberFormat::Comma, DayZone::UTC),
+            "Prix actuel : 227,21 (manuel, saisi le 01/10/2026)"
+        );
+        // Fetched at 02:00 UTC = 22:00 the evening before in New York.
+        j.current_price_origin = Some(o(Source::Provider, "2026-10-02T02:00:00Z", None));
+        assert_eq!(
+            trace_price(&j, NumberFormat::Comma, new_york),
+            "Prix actuel : 227,21 (fournisseur, récupéré le 01/10/2026)"
+        );
+        // The provider's session date is a date: shown as given, whatever the zone.
+        j.current_price_origin = Some(o(
+            Source::Provider,
+            "2026-10-02T23:30:00Z",
+            Some("2026-10-02"),
+        ));
+        for zone in [DayZone::UTC, zurich, new_york] {
+            assert_eq!(
+                trace_price(&j, NumberFormat::Comma, zone),
+                "Prix actuel : 227,21 (fournisseur, séance du 02/10/2026)"
+            );
+        }
+    }
+
+    // Owner decision 2026-10-01: a listing quoted in hundredths is named, with its conversion.
+    #[test]
+    fn the_trace_names_a_listing_converted_from_hundredths() {
+        let mut study = study_with(vec![], full_judgment());
+        study.native_currency = "GBP".to_string();
+        assert_eq!(trace_listing_subunit(&study), None);
+        study.listing_subunit = Some("GBX".to_string());
+        assert_eq!(
+            trace_listing_subunit(&study).as_deref(),
+            Some(
+                "Cotation du fournisseur en GBX (centièmes) : cours récupérés convertis en GBP (÷ 100)"
+            )
+        );
     }
 
     #[test]

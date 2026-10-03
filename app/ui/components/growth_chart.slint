@@ -359,7 +359,7 @@ export component GrowthChart inherits Rectangle {
                     y: root.active-y * 1px - self.height - Tokens.space-4;
                 }
                 // A neutral drag hint when the active line is unset (an affordance, never a value).
-                if root.active-y < 0.0: Text {
+                if root.active-y < 0.0 && !Studies.demo-active: Text {
                     text: "⇕";
                     color: Tokens.text-low;
                     font-size: Tokens.font-h3;
@@ -368,6 +368,8 @@ export component GrowthChart inherits Rectangle {
                 }
 
                 strip-touch := TouchArea {
+                    // The read-only demo has no study to write to: no grab cursor, no hint, no gesture.
+                    enabled: !Studies.demo-active;
                     mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.grab;
                     // Issue #187: the enclosing Flickable captures a gesture at press time, so it must
                     // already be non-interactive when the press lands — hover is the earliest signal.

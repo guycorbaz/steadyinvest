@@ -266,12 +266,30 @@ Plausibility warnings never block computation; they surface at the cell.
 
 **Currency, at the fetch (app layer, before anything reaches the engine):** a provider **listing**
 currency other than the study's (or than the currency chosen for an examination) is **refused** —
-nothing applied, named to the owner; a listing in a currency's hundredths (GBX, GBp, ZAc, ILA) is
-refused by its own name. Statements **reported** in another currency than the listing are
-**applied with a named warning**, per the rule above (réconcilié 2026-10-01 : PR #277).
-Décision en attente (Guy) : comptes publiés dans une autre devise que la cotation — avertir (état
-actuel) ou bloquer. Décision en attente (Guy) : cotations en centièmes (GBX…) — refusées
-aujourd'hui ; conversion ou non.
+nothing applied, named to the owner. A listing quoted in a currency's hundredths (GBX, GBp → GBP;
+ZAc → ZAR; ILA → ILS — exact codes, the case carries the meaning) is **converted at the fetch**
+(ingestion, before normalization): every price figure — each year's high and low, the latest close,
+the price-only holdings close — is divided by 100 exactly (decimal, never rounded), the listing
+currency becomes the major one, and the provider's code is recorded on the study and named in the
+traceability. Statement figures (sales, EPS, dividend and book value per share) and the trailing
+EPS are served in a major currency and are never divided; a statement amount that states no
+currency of its own is labelled in the major currency, not in the hundredths code (réconcilié
+2026-10-03 : revue PR #291). Vérifié 2026-10-03 sur ULVR.LSE (the one real fetch the owner
+authorised): the listing is `GBX` (latest close 4483.5 pence); `Highlights.EarningsShare` 2.18 is in
+GBP — the response's own P/E 20.5665 is 44.835 GBP ÷ 2.18 — and the served dividend figures are in
+GBP as well; the statements carry their own `currency_symbol`. A London listing may report its
+statements in a **third currency** — Unilever reports in EUR: neither the pence nor the pounds of
+its listing. Those statements are neither divided nor relabelled; they fall under the
+mixed-currency rule below (applied with the named warning « comptes publiés en EUR, cotation en
+GBP »), while the trailing EPS stays in the listing's major currency. The price-only refresh of a holding converts its
+close when the study's last fetch recorded the hundredths code; when the unit is **unknown** — the
+linked study was never fetched from the provider (typed, from an AI draft) and its venue quotes in
+hundredths (London, Johannesburg, Tel Aviv) — the close is **refused**, named, and nothing is
+applied (no price, no trailing-stop ratchet, no price history) until the study is fetched once; a
+study in the hundredths code itself (`GBX`) is told the major currency it belongs in (réconcilié
+2026-10-03 : revue PR #291). Statements **reported** in another currency than the listing are
+**applied with a named warning**, per the rule above (réconcilié 2026-10-01 : PR #277 ; conversion
+des centièmes, décision Guy 2026-10-01). Décision Guy 2026-10-01 (réconcilié 2026-10-03) : comptes publiés dans une autre devise que la cotation — acceptés avec l'avertissement nommé, jamais bloqués (NOVN, ABB : cotés en CHF à SIX) ; une conversion au taux moyen de chaque exercice reste à proposer en story.
 
 **`split_series_break` — normative detection rule** *(absorbed at ssg-1.1.0; quantifies
 "inconsistent with sales")*:
@@ -317,9 +335,16 @@ and not stale.
 
 `current_price` carries its origin (provider + session date, or typed + date); a fetched price
 becomes stale when a later refresh fails, which makes the verdict provisional (« Prix actuel —
-périmé ») until the next successful refresh; a typed price is never flagged (réconcilié 2026-10-01 :
-PR #274). Décision en attente (Guy) : horizon d'âge du cours (PRD Appendix A : « un jour de bourse »
-par défaut, réglable) — non implémenté ; seul l'échec d'un rafraîchissement rend le cours périmé.
+périmé ») until the next successful refresh (réconcilié 2026-10-01 : PR #274). Any current price,
+fetched or typed, is also stale once older than the age horizon — a whole number of trading days
+(Monday–Friday, no holiday calendar), one by default, set in Réglages — counted from its session date,
+else the date it was fetched or typed; the age is computed at read time, never stored (réconcilié
+2026-10-01 : décision Guy, horizon d'âge du cours). The days are counted in the owner's local time;
+a current price with no recorded origin (written before origins were recorded) has an unknown date
+and is stale too — the verdict provisional, naming « Prix actuel — date inconnue » — until it is
+typed or fetched again (réconcilié 2026-10-03 : décisions Guy, revue PR #293); so is a price whose
+recorded date cannot be read. The date shown for a price's origin is the local day its age is
+counted from (réconcilié 2026-10-03 : décision Guy D, PR #293).
 
 ## 6. Banned-verb list (FR13) — posture gate
 

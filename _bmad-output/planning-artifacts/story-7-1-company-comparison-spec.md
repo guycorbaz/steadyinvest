@@ -31,10 +31,11 @@ two distinct studies.
 
 ## 3. The rows (the form's numbering, neutral wording)
 
-> Décision en attente (Guy) : l'écran Comparaison et son PDF gardent le vocabulaire neutre
-> (décision du 2026-09-26), alors que FR63 fait suivre le jeu de libellés NAIC↔neutre et que tout le
-> reste de l'application le suit désormais (réconcilié 2026-10-01 : PR #275, exemption gardée par le
-> test `zone_nouns_come_from_the_label_set_never_hard_coded`).
+> Décision Guy 2026-10-01 (remplace celle du 2026-09-26, qui gardait l'écran et son PDF neutres) :
+> la Comparaison est le Stock Comparison Guide de la méthode NAIC — les noms de zone de l'écran et
+> du PDF (lignes 17–19, mots de la ligne 20) suivent le jeu de libellés actif, sans exception ; le
+> reste des libellés reste neutre (réconcilié 2026-10-01 : exemption retirée du test
+> `zone_nouns_come_from_the_label_set_never_hard_coded`).
 
 Columns: one per study — ticker, company name, currency, decision date.
 

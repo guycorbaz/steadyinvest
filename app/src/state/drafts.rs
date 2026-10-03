@@ -902,7 +902,9 @@ impl JournalState {
             if studies.contains_key(&id) {
                 continue;
             }
-            if let Some(study) = journal.get_study(id).map_err(inbox_read_error)? {
+            if let Some(mut study) = journal.get_study(id).map_err(inbox_read_error)? {
+                // FR23 age horizon: the inbox renders the study as current (its verdict too).
+                self.apply_price_age(&mut study);
                 if journal
                     .study_status(id)
                     .map_err(inbox_read_error)?

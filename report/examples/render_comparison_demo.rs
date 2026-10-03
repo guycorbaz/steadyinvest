@@ -41,6 +41,7 @@ fn main() {
             column("ROG.SW", "Roche", "CHF", true),
             column("ABBN.SW", "ABB", "CHF", false),
         ],
+        ..Comparison::default()
     };
     let out = std::env::args()
         .nth(1)

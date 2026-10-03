@@ -3,10 +3,12 @@
 // words only; an absent figure is « — », a study that could not be read is « indisponible », a
 // picked study that no longer exists is « introuvable ». Owner decision (Guy, 2026-09-26): rows
 // 2, 4, 12, 14 show the JUDGED value the calculations use, with its « * » explained under the
-// group; rows 20–23 (the conclusions) are in bold — as in the PDF.
+// group; rows 20–23 (the conclusions) are in bold — as in the PDF. Owner decision (Guy,
+// 2026-10-01, FR63): the comparison is the NAIC Stock Comparison Guide, part of the methodology —
+// its zone nouns (rows 17–19, the row-20 words) are the active label set's, as in its PDF.
 
 import { Tokens } from "../tokens.slint";
-import { Comparison, ComparisonHeader } from "../state.slint";
+import { Comparison, ComparisonHeader, Labels } from "../state.slint";
 import { ActionButton } from "../components/action_button.slint";
 import { PanelCard } from "../components/panel_card.slint";
 import { StatusBand } from "../components/status_band.slint";
@@ -53,13 +55,13 @@ component CmpRow inherits HorizontalLayout {
         font-weight: root.strong ? Tokens.weight-semibold : Tokens.weight-regular;
         horizontal-stretch: 1;
     }
-    // Row 20 names the band of rows 17–19 in THEIR words — the same nouns as the PDF (G1, #237),
-    // not the label-set words (`Labels.zone-*`), which the report never carries — in lower case
-    // like the other worded cells (owner decision, 2026-09-26).
+    // Row 20 names the band of rows 17–19 in THEIR words — the same nouns as the PDF (G1, #237):
+    // the active label set's (`Labels.zone-*`, FR63 — owner decision, Guy 2026-10-01; the PDF
+    // receives the same set) — in lower case like the other worded cells (2026-09-26).
     pure function zone-words(key: string) -> string {
-        if (key == "buy") { return @tr("zone basse"); }
-        if (key == "neutral") { return @tr("zone médiane"); }
-        if (key == "sell") { return @tr("zone haute"); }
+        if (key == "buy") { return Labels.zone-buy.to-lowercase(); }
+        if (key == "neutral") { return Labels.zone-hold.to-lowercase(); }
+        if (key == "sell") { return Labels.zone-sell.to-lowercase(); }
         if (key == "below") { return @tr("sous la bande"); }
         if (key == "above") { return @tr("au-dessus de la bande"); }
         return "—";
@@ -210,9 +212,9 @@ export component ComparisonScreen inherits Rectangle {
                 CmpRow { number: 14; label: @tr("PER bas moyen jugé"); }
                 CmpRow { number: 15; label: @tr("PER le plus bas sur 5 ans"); }
                 CmpRow { number: 16; label: @tr("PER actuel"); }
-                CmpRow { number: 17; label: @tr("Zone basse"); }
-                CmpRow { number: 18; label: @tr("Zone médiane"); }
-                CmpRow { number: 19; label: @tr("Zone haute"); }
+                CmpRow { number: 17; label: Labels.zone-buy; }
+                CmpRow { number: 18; label: Labels.zone-hold; }
+                CmpRow { number: 19; label: Labels.zone-sell; }
                 CmpRow { number: 20; label: @tr("Position du cours actuel"); strong: true; }
                 CmpRow { number: 21; label: @tr("Ratio hausse / baisse"); strong: true; }
                 CmpRow { number: 22; label: @tr("Rendement présent"); strong: true; }

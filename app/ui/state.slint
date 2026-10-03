@@ -14,6 +14,17 @@ export global Labels {
     in-out property <string> zone-sell;
 }
 
+// FR63 (owner decision, Guy 2026-10-01): the screens outside the NAIC methodology — the holdings
+// (« Portefeuilles ») and the watchlist — word the zones in the NEUTRAL set whatever the active
+// label set. Their nouns are the neutral set's (`steadyinvest_report::ZoneNouns::NEUTRAL`, the one
+// source `labels.rs` also reads), pushed once by `labels::apply_neutral_zones` before the window
+// shows. Never hard-coded here; never read by a NAIC-methodology screen (posture test).
+export global NeutralZones {
+    in-out property <string> zone-buy;
+    in-out property <string> zone-hold;
+    in-out property <string> zone-sell;
+}
+
 // One row of the Studies dashboard list — the indexed columns of `persistence::StudySummary`,
 // mapped to display strings by `app/src/viewmodel/studies.rs` (dates/status formatted in Rust,
 // never computed in the UI). `id` is the stringified UUID, passed back verbatim on open.
@@ -1057,6 +1068,10 @@ export global Prefs {
     // Story 6.4 (FR41): the default dividend withholding rate in percent (mirrors
     // AppConfig.withholding_rate_pct_or_default — always a value, 35 = CH impôt anticipé).
     in-out property <string> withholding-rate-pct;
+    // FR23 (owner decision 2026-10-01): the current price's age horizon in trading days (mirrors
+    // AppConfig.price_stale_after_or_default — always a value, 1 by default). A price older than
+    // this many trading days (Monday–Friday) is « périmé » and the verdict provisional.
+    in-out property <string> price-stale-after;
     // G1 P review (M3): after a reference-currency change, the legacy lots (no declared currency)
     // whose stop was set in the former reference currency — named, never converted ("" = none).
     in-out property <string> reference-currency-notice;
@@ -1123,6 +1138,7 @@ export global Prefs {
     callback reference-currency-selected(string); // "CHF" | "EUR" | "USD" | "GBP" | …
     callback default-trailing-stop-pct-changed(string) -> bool; // "" clears; else a percent in (0,100); → written?
     callback withholding-rate-pct-changed(string) -> bool; // "" resets to 35; else a percent in [0,100]; → written?
+    callback price-stale-after-changed(string) -> bool; // "" resets to 1; else whole trading days in [1,260]; → written?
     // The key travels ONE WAY into Rust as a call argument — never stored in an `in-out` property
     // that could round-trip back out to config/UI (NFR-S1). Issue #41: `key-saved` returns whether a
     // save actually happened, so the field is cleared ONLY on a real save (a blank/failed save keeps

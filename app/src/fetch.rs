@@ -171,6 +171,10 @@ pub enum WorkerJob {
     RefreshHolding {
         request: FetchRequest,
         generation: u64,
+        /// Owner decision 2026-10-01: the hundredths code (GBX…) the study's last fetch recorded
+        /// ([`steadyinvest_contract::Study::listing_subunit`]) — the bare quote states no currency,
+        /// so the ingestion converts the close on this code.
+        listing_subunit: Option<String>,
     },
     /// An FX-rates refresh (Story 6.5): the latest BASE→QUOTE rate per pair.
     FetchFxRates(FxRatesRequest),
@@ -512,6 +516,7 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                     WorkerJob::RefreshHolding {
                         request: req,
                         generation,
+                        listing_subunit,
                     } => {
                         // Issue #50: a PRICE-ONLY fetch (no fundamentals) so the holdings refresh works
                         // on a free tier; routed to the holdings surface. Twelve Data uses `/price`.
@@ -527,6 +532,7 @@ pub fn spawn_fetch_worker() -> (mpsc::Sender<WorkerJob>, Arc<AtomicBool>) {
                                 provider,
                                 &req.ticker,
                                 key,
+                                listing_subunit.as_deref(),
                             )) {
                                 Ok(None) => Err(IngestionError::Provider(
                                     steadyinvest_ingestion::ProviderError::TickerNotFound {
@@ -793,7 +799,7 @@ mod tests {
             select,
             members,
             ProviderChoice::Eodhd,
-            |provider, key| match runtime.block_on(fetch_price(provider, "AAPL", key)) {
+            |provider, key| match runtime.block_on(fetch_price(provider, "AAPL", key, None)) {
                 // The worker's no-quote rule (2026-07-03 review): Ok(None) advances the chain.
                 Ok(None) => Err(IngestionError::Provider(ProviderError::TickerNotFound {
                     ticker: "AAPL".into(),
@@ -910,7 +916,7 @@ mod tests {
             select,
             &chain(),
             ProviderChoice::Eodhd,
-            |provider, key| match runtime.block_on(fetch_price(provider, "AAPL", key)) {
+            |provider, key| match runtime.block_on(fetch_price(provider, "AAPL", key, None)) {
                 Ok(None) => Err(IngestionError::Provider(ProviderError::TickerNotFound {
                     ticker: "AAPL".into(),
                 })),

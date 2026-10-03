@@ -1222,6 +1222,7 @@ mod tests {
             company_name: None,
             notes: Vec::new(),
             frozen_verdict: None,
+            listing_subunit: None,
             created_at: Timestamp("2026-09-01T00:00:00Z".into()),
             schema_version: SCHEMA_VERSION,
         }

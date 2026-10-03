@@ -64,6 +64,8 @@ pub(crate) fn mirror_risk_settings(ui: &MainWindow, cfg: &crate::config::AppConf
     prefs.set_size_target_small_pct(shown.target_small.into());
     prefs.set_size_target_medium_pct(shown.target_medium.into());
     prefs.set_size_target_large_pct(shown.target_large.into());
+    // FR23 (owner decision 2026-10-01): the price age horizon, a whole number of trading days.
+    prefs.set_price_stale_after(cfg.price_stale_after_or_default().to_string().into());
     let threshold = cfg.concentration_threshold_pct_or_default();
     let (small_max, medium_max) = cfg.size_bounds_or_default();
     let (target_small, target_medium, target_large) = cfg.size_targets_or_default();
@@ -163,6 +165,7 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
         holding_dismissed,
         quick_screen,
         screening,
+        current_study,
         ..
     } = s;
     // Settings intents: apply live (no restart), mirror into Prefs, persist on change.
@@ -425,6 +428,52 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                     &holding_dismissed.borrow(),
                     format,
                 );
+                true
+            });
+    }
+    // ── FR23 (owner decision 2026-10-01) — the current price's age horizon in trading days. ""
+    // resets to the default (1); else a whole number in 1..=260. A refusal names itself and
+    // writes nothing (the typed text kept, G1 AC1). The age is applied on every study READ, so a
+    // success only has to push the horizon into the state and re-render what is on screen: the
+    // open study and the list (every other surface re-derives on navigation, #94). ──
+    {
+        let ui_weak = ui.as_weak();
+        let config = Rc::clone(config);
+        let path = config_path.clone();
+        let journal_state = Rc::clone(journal_state);
+        let current_study = Rc::clone(current_study);
+        ui.global::<Prefs>()
+            .on_price_stale_after_changed(move |value| {
+                let ui = ui_weak.unwrap();
+                let format = config.borrow().number_format;
+                let stored = match setting_input(
+                    value.trim(),
+                    format,
+                    config::is_valid_price_stale_after,
+                    crate::state::MSG_PRICE_STALE_AFTER_INVALID,
+                ) {
+                    Ok(stored) => stored,
+                    Err(message) => {
+                        // The refusal keeps the typed text (G1 review, AC1).
+                        crate::wiring::dialog::refuse(&ui, &message);
+                        return false;
+                    }
+                };
+                config.borrow_mut().price_stale_after_trading_days = stored;
+                persist(path.as_ref(), &config.borrow());
+                let horizon = config.borrow().price_stale_after_or_default();
+                journal_state.borrow_mut().set_price_stale_after(horizon);
+                mirror_risk_settings(&ui, &config.borrow());
+                let state = journal_state.borrow();
+                if let Some(id) = current_study
+                    .borrow()
+                    .as_deref()
+                    .and_then(|id| uuid::Uuid::parse_str(id).ok())
+                    && let Some(study) = state.get_study(id)
+                {
+                    crate::wiring::push::push_form(&ui, &state, &study, format);
+                }
+                crate::wiring::studies::refresh_studies(&ui, &state);
                 true
             });
     }

@@ -5873,6 +5873,7 @@ dependencies = [
 name = "steadyinvest-report"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "pdf-writer",
  "rust_decimal",
  "steadyinvest-contract",

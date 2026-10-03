@@ -569,6 +569,44 @@ export component SettingsScreen inherits Rectangle {
                 }
             }
 
+            // FR23 (owner decision 2026-10-01) — the age past which the current price is stale:
+            // a whole number of trading days (Monday–Friday, no holiday calendar). A fetched or a
+            // typed price older than that is « périmé » and the verdict provisional. A fact.
+            stale-panel := PanelCard {
+                title: @tr("Cours périmé après (jours de bourse)");
+                property <string> draft: Prefs.price-stale-after;
+                property <int> epoch: Prefs.number-settings-epoch;
+                changed epoch => { stale-panel.draft = Prefs.price-stale-after; }
+
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: Tokens.space-8;
+
+                    TextField {
+                        placeholder: @tr("Jours de bourse (1–260, vide = 1)");
+                        text <=> stale-panel.draft;
+                        width: 260px;
+                    }
+                    ActionButton {
+                        label: @tr("Enregistrer");
+                        enabled: true;
+                        // Issue #88: re-sync the field to the effective value after a written save
+                        // (see the trailing-stop panel); a refusal keeps the typed text (G1, AC1).
+                        clicked => {
+                            if (Prefs.price-stale-after-changed(stale-panel.draft)) {
+                                stale-panel.draft = Prefs.price-stale-after;
+                            }
+                        }
+                    }
+                }
+                Text {
+                    text: @tr("Un cours, récupéré ou saisi, plus ancien que ce nombre de jours de bourse (lundi à vendredi) est signalé périmé ; le verdict devient provisoire.");
+                    color: Tokens.text-low;
+                    font-size: Tokens.font-caption;
+                    wrap: word-wrap;
+                }
+            }
+
             // Story 6.7 (FR45) — the concentration threshold + the configurable diversify-by-size
             // table (change-request): boundaries are compared against study sales CONVERTED to
             // the reference currency, in the same unit as entered in studies; targets are the

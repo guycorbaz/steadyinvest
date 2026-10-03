@@ -468,14 +468,61 @@ against this skeleton as the principal go/no-go before committing UI work.
   PR #274, #276, #277): the current price records its origin (`Judgment.current_price_origin`:
   provider + session date, or owner-typed + date); a failed refresh flags a fetched price stale and
   the verdict becomes provisional (« Prix actuel — périmé ») until a successful refresh — a price is
-  stale only after a failure, never by age. **Décision en attente (Guy) : horizon d'âge du cours
-  (FR23, « un jour de bourse » par défaut, réglable) — non implémenté.** An unknown symbol's notice
+  stale after a failure, or by age (réconcilié 2026-10-01 : décision Guy, horizon d'âge du cours):
+  past `AppConfig.price_stale_after_trading_days` trading days (Monday–Friday, default 1) counted from
+  the session date (else the fetch or typing date), `report::price_age` marks the **read copy**
+  (`PriceOrigin::aged`, `#[serde(skip)]` — never persisted, so a changed horizon applies on the next
+  read) in `JournalState::try_get_study` and in the MCP `get_study`; `PriceOrigin::is_stale()` is the
+  one test the verdict, the traceability and the PDF use. The same price written again for a later
+  day (retyped, or fetched without a session date) renews its origin
+  (`price_age::same_price_renews`); the same day or session stays a no-op. The MCP `get_study`
+  states the age as `computed.price_aged` + `computed.price_stale_after_trading_days`, since the
+  study JSON's `freshness` carries only a failed refresh's flag. No holiday calendar (accepted
+  limitation): after an exchange holiday the last close is stale at horizon 1 until the next close
+  (réconcilié 2026-10-03 : revue PR #293). Decided (Guy, 2026-10-03), each one place in
+  `report::price_age` (réconcilié 2026-10-03 : décisions Guy, revue PR #293): the trading day —
+  « today » and the day of a stamp — is the owner's **local** day (`DayZone::day_of`; `Local` in
+  the app and the MCP server, injected with the app `Clock` — `FixedClock` reads UTC — so no test
+  depends on the machine's zone); a provider session date is a date, taken as given. A present
+  price with **no recorded origin** (written before origins were recorded) has an unknown date
+  (`PriceAge::UnknownDate`): its gate is `Stale` (`form::price_to_gate_state`), the verdict
+  provisional with the open gate « Prix actuel — date inconnue » (distinct from « périmé »); the
+  traceability says « origine non enregistrée — date inconnue », the PDF « Origine du cours actuel :
+  non enregistrée — date inconnue ». Writing the price again — retyped or fetched, even the same
+  value — records an origin and makes it fresh (`same_price_renews` treats a missing origin as
+  renewable). An origin whose date cannot be read (`price_age::price_date_known`) is an unknown date
+  the same way — gate `Stale`, « date inconnue », its source named (« fournisseur — date
+  inconnue », « manuel — date inconnue »), renewed by the next write; the date shown for an origin
+  (« récupéré le … », « saisi le … » — traceability via `verdict_trace(…, zone)`, study PDF via
+  `StudyPdfExtras::day_zone`) is `price_age::price_date_shown`, the age's own day in the same
+  `DayZone`, so the shown day never contradicts the age; a session date is shown as given
+  (réconcilié 2026-10-03 : décisions Guy C et D, PR #293). No current price at all stays the
+  missing-input path. An unknown symbol's notice
   names the app's ticker convention (`.DE` → `.XETRA`, `.AX` → `.AU`; `ingestion::ticker`). A
-  provider listing currency different from the study's is **refused** before anything is applied,
-  as is a listing quoted in hundredths (GBX, GBp, ZAc, ILA); statements reported in another
-  currency than the listing are applied with a named **warning**. **Décision en attente (Guy) :
-  comptes publiés dans une autre devise — avertir ou bloquer ; cotations en centièmes (GBX…) —
-  refusées, convertir ou non.**
+  provider listing currency different from the study's is **refused** before anything is applied.
+  A listing quoted in hundredths (GBX, GBp → GBP; ZAc → ZAR; ILA → ILS) is **converted** at one
+  place, `ingestion::subunit`, called by `fetch_canonical` and `fetch_price` before `normalize`:
+  price figures ÷ 100 (exact decimal), `native_currency` = the major code, the provider's code in
+  `FetchedFinancials.listing_subunit` → `Study.listing_subunit` (additive serde field; traceability
+  line, and the price-only holdings refresh, whose bare quote states no currency, converts on it);
+  statement figures are never divided (réconcilié 2026-10-01 : décision Guy, conversion des
+  centièmes) — a statement amount without its own currency is relabelled to the major code, not
+  divided. Holdings price-only rule: converted when the unit is known (`Study.listing_subunit`, or
+  a study holding provider-sourced cells = fetched and served as is); **refused** when unknown on a
+  hundredths venue (`ingestion::ticker::hundredths_venue` — `.LSE`/`.L`, `.JSE`/`.JO`, `.TA`; pure
+  predicate `state::price_unit_unknown`): not fetched, nothing applied (price, stop ratchet, price
+  history), named (`MSG_HOLDINGS_UNIT_UNKNOWN`). The conversion line (`report::LISTING_SUBUNIT_LINE`)
+  is the same in the traceability, the study PDF and the quick screen (réconcilié 2026-10-03 : revue
+  PR #291). Unit of the fundamentals of a hundredths listing — vérifié 2026-10-03 sur ULVR.LSE:
+  `General.CurrencyCode` `GBX`, `/eod` close 4483.5 (pence); `Highlights.EarningsShare` 2.18 in GBP
+  (the served `PERatio` 20.5665 = 44.835 GBP ÷ 2.18), dividend figures in GBP too → the trailing EPS
+  is never divided; the statement rows state `currency_symbol` EUR (Unilever reports in euros). A
+  London listing may thus report in a **third currency**: its statements are neither divided nor
+  relabelled and take the mixed-currency path below (`currency_mismatch`,
+  `FetchedFinancials.reported_currencies` → « comptes publiés en EUR, cotation en GBP »); pinned by
+  the trimmed real extract `ingestion/tests/fixtures/eodhd-*-ULVR-real.json`.
+  Statements reported in another currency than the listing are applied with a named
+  **warning**. **Décision Guy 2026-10-01 (réconcilié 2026-10-03) : comptes publiés dans une autre devise que la cotation — acceptés avec l'avertissement nommé, jamais bloqués (NOVN, ABB : cotés en CHF à SIX) ; une conversion au taux moyen de chaque exercice reste à proposer en story.**
 - **Errors:** `thiserror` 2.0 domain errors per crate; neutral, cause-named messages; **no silent
   `.ok()`** (explicit lesson from the prior project's chart-rendering bugs).
 
@@ -647,6 +694,13 @@ decimal values stored as `TEXT` decimal strings** (NOT `REAL` — preserves `rus
 - **UI strings:** Slint **`@tr()`** (compile-time translation, gettext), **French first**, i18n-ready.
 - **NAIC↔neutral label set:** a **runtime-swappable data table** (not a translation) — the
   domain/method labels the user can switch; lives in data, loaded at runtime, distinct from `@tr()`.
+  Where it applies (réconcilié 2026-10-01 : décision Guy 2026-10-01, qui remplace celle du
+  2026-09-26 — Comparaison et PDF neutres) : every screen of the NAIC methodology and its PDF — the
+  study, the Comparison, the portfolio Revue; the PDFs receive the set in force from `app`
+  (`steadyinvest_report::ZoneNouns`, the one source of the zone nouns). Outside the methodology —
+  quick screen, criblage, holdings, watchlist, AI proposals — and in the MCP codes, neutral; the
+  holdings and the watchlist read the neutral set's nouns from the same source (the Slint global
+  `NeutralZones`, fed from `ZoneNouns::NEUTRAL`), never the active set (posture-tested).
 
 ### Enforcement Guidelines
 
@@ -909,7 +963,12 @@ and architecture decisions A1–A13 below are final._
   state, and must never re-derive a value (Cardinal Rule). The quality flags it returns follow the
   same presentation rule as the screens — `core::ssg::shown_quality_flags` (the highest high-P/E
   threshold only), shared by `app` and `mcp` — and `computed.quality_flags_assessable` tells an empty
-  list meaning « none » from « not assessable » (réconcilié 2026-10-01 : PR #285).
+  list meaning « none » from « not assessable » (réconcilié 2026-10-01 : PR #285). `computed` also
+  carries `price_aged` and `price_stale_after_trading_days` — the current price's FR23 age on this
+  read and the horizon used (réconcilié 2026-10-03 : revue PR #293) — and `price_age`
+  (`"fresh"` | `"aged"` | `"unknown"`, `null` without a price): `"unknown"` is a price with no
+  recorded origin, stale like `"aged"` (`price_aged` true for both) but told apart from it
+  (réconcilié 2026-10-03 : décision Guy C).
 
 ### A2 — Per-call connection, no lock, version gate
 
