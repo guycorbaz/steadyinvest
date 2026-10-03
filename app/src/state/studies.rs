@@ -223,7 +223,8 @@ impl JournalState {
     /// Mark `study` (a read copy) with the FR23 age horizon on today's clock — for a study read
     /// outside [`Self::try_get_study`] that is rendered as current.
     pub fn apply_price_age(&self, study: &mut Study) {
-        let today = steadyinvest_report::price_age::today(&self.clock.now());
-        steadyinvest_report::price_age::apply_price_age(study, today, self.price_stale_after);
+        let zone = self.clock.day_zone();
+        let today = zone.today(&self.clock.now());
+        steadyinvest_report::price_age::apply_price_age(study, today, self.price_stale_after, zone);
     }
 }

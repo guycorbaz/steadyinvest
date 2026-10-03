@@ -160,7 +160,10 @@ pub fn judgment_to_gate_state(value: Option<Money>) -> GateState {
 /// The current price → [`GateState`] (Guy's on-screen test 2026-10-01, FR12 / FR23): `None` →
 /// `Missing`; a price whose origin is stale — flagged by a failed refresh, or older than the age
 /// horizon on this read ([`crate::price_age`], marked by the caller's read) — → `Stale` (the
-/// verdict degrades, as for a stale provider cell); otherwise `ValidatedFresh` — a fetched price
+/// verdict degrades, as for a stale provider cell); a price with **no recorded origin** (written
+/// before origins were recorded) has an unknown date → `Stale` too (owner decision C, Guy
+/// 2026-10-03 — its open gate is named « date inconnue », apart from « périmé »:
+/// [`crate::price_age::PriceAge::UnknownDate`]); otherwise `ValidatedFresh` — a fetched price
 /// is the owner's own gesture (he asked for the fetch), a typed one his own number.
 pub fn price_to_gate_state(
     value: Option<Money>,
@@ -169,9 +172,9 @@ pub fn price_to_gate_state(
     match (value, origin) {
         (None, _) => GateState::Missing,
         (Some(_), Some(o)) if o.is_stale() => GateState::Stale,
-        // A price with no recorded origin: the one policy decides (never aged today).
-        (Some(_), None) if crate::price_age::unknown_origin_is_aged() => GateState::Stale,
-        (Some(_), _) => GateState::ValidatedFresh,
+        // No recorded origin: the price's date is unknown — stale (decision C, 2026-10-03).
+        (Some(_), None) => GateState::Stale,
+        (Some(_), Some(_)) => GateState::ValidatedFresh,
     }
 }
 
@@ -427,7 +430,13 @@ pub(crate) mod tests {
     pub(crate) fn full_study() -> Study {
         let judgment = Judgment {
             ai_placed: Default::default(),
-            current_price_origin: None,
+            current_price_origin: Some(steadyinvest_contract::PriceOrigin {
+                source: steadyinvest_contract::Source::Manual,
+                at: steadyinvest_contract::Timestamp("2026-03-09T09:30:00Z".to_string()),
+                session_date: None,
+                freshness: steadyinvest_contract::Freshness::Current,
+                aged: false,
+            }),
             estimated_high_eps: Some(money_of("9")),
             estimated_low_eps: Some(money_of("4")),
             projected_sales_growth_pct: None,
@@ -527,8 +536,8 @@ pub(crate) mod tests {
         assert_eq!(price_to_gate_state(None, None), GateState::Missing);
         assert_eq!(
             price_to_gate_state(price, None),
-            GateState::ValidatedFresh,
-            "unknown origin"
+            GateState::Stale,
+            "unknown origin: date unknown, stale (decision C)"
         );
         assert_eq!(
             price_to_gate_state(price, Some(&o(Source::Provider, Freshness::Current))),

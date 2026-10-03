@@ -15,6 +15,7 @@ use steadyinvest_core::verdict::{GateState, GatedInput, StudySnapshot, Verdict};
 use steadyinvest_persistence::{
     DossierIdentity, DraftRecord, McpSnapshot, McpStudyRead, Paged, StudySummary,
 };
+use steadyinvest_report::price_age;
 
 /// The dossier a call read (O3): `journal_id` + resolved path.
 pub fn dossier(id: &DossierIdentity) -> Value {
@@ -138,21 +139,35 @@ fn study_json(study: &Study) -> Value {
 
 /// `get_study`: the study, its status and its computed outputs. A study the engine cannot
 /// normalize still returns its data, with `computed: null` and the reason. The current price is
-/// aged on `now`'s day with the owner's horizon (FR23) before the verdict is computed — the same
-/// read-time rule as the app (`report::price_age`; the mark is never serialized). Since the study
-/// JSON's `current_price_origin.freshness` only carries a failed refresh's flag, `computed` states
-/// the age explicitly (review of PR #293): `price_aged` (the current price is past the horizon on
-/// this read — why an `open_gates` entry can say `stale` while the freshness says `current`) and
-/// `price_stale_after_trading_days` (the horizon used).
-pub fn study_read(read: &McpStudyRead, now: &Timestamp, price_stale_after: u32) -> Value {
-    use steadyinvest_report::price_age;
+/// aged on `now`'s local day ([`DayZone`](price_age::DayZone)) with the owner's horizon (FR23)
+/// before the verdict is computed — the same read-time rule as the app (`report::price_age`; the
+/// mark is never serialized). Since the study JSON's `current_price_origin.freshness` only carries
+/// a failed refresh's flag, `computed` states the age explicitly (review of PR #293, owner
+/// decision C 2026-10-03):
+/// - `price_age`: `"fresh"`, `"aged"` (past the horizon on this read) or `"unknown"` (a price with
+///   no recorded origin — written before origins were recorded: its date is unknown and it counts
+///   as stale); `null` when there is no current price;
+/// - `price_aged`: `true` when the price counts as stale by age — `"aged"` or `"unknown"` (why an
+///   `open_gates` entry can say `stale` while the freshness says `current` or is absent);
+/// - `price_stale_after_trading_days`: the horizon used.
+pub fn study_read(
+    read: &McpStudyRead,
+    now: &Timestamp,
+    price_stale_after: u32,
+    zone: price_age::DayZone,
+) -> Value {
     let mut study = read.study.clone();
-    price_age::apply_price_age(&mut study, price_age::today(now), price_stale_after);
-    let price_aged = study.judgment.current_price.is_some()
-        && match study.judgment.current_price_origin.as_ref() {
-            Some(origin) => origin.aged,
-            None => price_age::unknown_origin_is_aged(),
-        };
+    price_age::apply_price_age(&mut study, zone.today(now), price_stale_after, zone);
+    let age = price_age::current_price_age(&study.judgment);
+    let price_aged = matches!(
+        age,
+        Some(price_age::PriceAge::Aged | price_age::PriceAge::UnknownDate)
+    );
+    let price_age_code = age.map(|a| match a {
+        price_age::PriceAge::Fresh => "fresh",
+        price_age::PriceAge::Aged => "aged",
+        price_age::PriceAge::UnknownDate => "unknown",
+    });
     let mut v = json!({
         "status": read.status,
         "study": study_json(&study),
@@ -160,6 +175,7 @@ pub fn study_read(read: &McpStudyRead, now: &Timestamp, price_stale_after: u32) 
     match steadyinvest_report::form::build_snapshot(&study) {
         Ok(snapshot) => {
             let mut c = computed(&snapshot, &study);
+            c["price_age"] = json!(price_age_code);
             c["price_aged"] = Value::Bool(price_aged);
             c["price_stale_after_trading_days"] = json!(price_stale_after);
             v["computed"] = c;
@@ -251,6 +267,8 @@ mod tests {
     use steadyinvest_core::verdict::Verdict;
     use uuid::Uuid;
 
+    const UTC: price_age::DayZone = price_age::DayZone::UTC;
+
     fn money(s: &str) -> Money {
         Money::from(Decimal::from_str_exact(s).unwrap())
     }
@@ -277,7 +295,13 @@ mod tests {
     fn full_study() -> Study {
         let judgment = Judgment {
             ai_placed: Default::default(),
-            current_price_origin: None,
+            current_price_origin: Some(steadyinvest_contract::PriceOrigin {
+                source: Source::Manual,
+                at: Timestamp("2026-10-01T09:00:00Z".to_string()),
+                session_date: None,
+                freshness: Freshness::Current,
+                aged: false,
+            }),
             estimated_high_eps: Some(money("9")),
             estimated_low_eps: Some(money("4")),
             projected_sales_growth_pct: None,
@@ -370,7 +394,12 @@ mod tests {
             study,
             status: "active".to_string(),
         };
-        let v = study_read(&read, &Timestamp("2026-10-01T10:00:00Z".to_string()), 1);
+        let v = study_read(
+            &read,
+            &Timestamp("2026-10-01T10:00:00Z".to_string()),
+            1,
+            UTC,
+        );
         assert_eq!(v["computed"], Value::Null);
         assert!(v["computed_unavailable"].is_string(), "{v}");
         assert_eq!(v["study"]["security_ticker"], json!("NESN"));
@@ -395,17 +424,17 @@ mod tests {
         let monday = Timestamp("2026-10-05T09:00:00Z".to_string());
         let tuesday = Timestamp("2026-10-06T09:00:00Z".to_string());
         assert_eq!(
-            study_read(&read, &monday, 1)["computed"]["verdict_state"],
+            study_read(&read, &monday, 1, UTC)["computed"]["verdict_state"],
             json!("full")
         );
-        let aged = study_read(&read, &tuesday, 1);
+        let aged = study_read(&read, &tuesday, 1, UTC);
         assert_eq!(
             aged["computed"]["verdict_state"],
             json!("provisional"),
             "{aged}"
         );
         assert!(!aged["study"].to_string().contains("aged"));
-        let wider = study_read(&read, &tuesday, 2);
+        let wider = study_read(&read, &tuesday, 2, UTC);
         assert_eq!(wider["computed"]["verdict_state"], json!("full"));
         // Review of PR #293: the study JSON's freshness still says `current` (no failed refresh),
         // so `computed` states the age and the horizon explicitly — no self-contradiction.
@@ -424,7 +453,7 @@ mod tests {
             "{aged}"
         );
         assert_eq!(
-            study_read(&read, &monday, 1)["computed"]["price_aged"],
+            study_read(&read, &monday, 1, UTC)["computed"]["price_aged"],
             json!(false)
         );
         assert_eq!(wider["computed"]["price_aged"], json!(false));
@@ -432,6 +461,62 @@ mod tests {
             wider["computed"]["price_stale_after_trading_days"],
             json!(2)
         );
+    }
+
+    // Owner decision C (Guy 2026-10-03): a price with no recorded origin has an unknown date — the
+    // live verdict is provisional, `price_aged` true and `price_age` "unknown" (told apart from
+    // "aged"); no price at all is the missing-input path, `price_age` null.
+    #[test]
+    fn a_price_without_origin_reads_as_an_unknown_date() {
+        let monday = Timestamp("2026-10-05T09:00:00Z".to_string());
+        let mut study = full_study();
+        let fresh = study_read(
+            &McpStudyRead {
+                study: study.clone(),
+                status: "active".to_string(),
+            },
+            &Timestamp("2026-10-01T10:00:00Z".to_string()),
+            1,
+            UTC,
+        );
+        assert_eq!(fresh["computed"]["price_age"], json!("fresh"));
+        assert_eq!(fresh["computed"]["price_aged"], json!(false));
+        let aged = study_read(
+            &McpStudyRead {
+                study: study.clone(),
+                status: "active".to_string(),
+            },
+            &monday,
+            1,
+            UTC,
+        );
+        assert_eq!(aged["computed"]["price_age"], json!("aged"));
+        study.judgment.current_price_origin = None;
+        let read = McpStudyRead {
+            study: study.clone(),
+            status: "active".to_string(),
+        };
+        let v = study_read(&read, &monday, 1, UTC);
+        assert_eq!(v["computed"]["verdict_state"], json!("provisional"), "{v}");
+        assert_eq!(v["computed"]["price_age"], json!("unknown"));
+        assert_eq!(v["computed"]["price_aged"], json!(true));
+        assert!(
+            v["computed"]["open_gates"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|g| g["input"]["field"] == json!("current_price")
+                    && g["state"] == json!("stale")),
+            "{v}"
+        );
+        study.judgment.current_price = None;
+        let read = McpStudyRead {
+            study,
+            status: "active".to_string(),
+        };
+        let v = study_read(&read, &monday, 1, UTC);
+        assert_eq!(v["computed"]["price_age"], Value::Null);
+        assert_eq!(v["computed"]["price_aged"], json!(false));
     }
 
     // Project review 2026-10-01: the AI reads the flags the owner sees — one high-P/E flag — and

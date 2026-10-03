@@ -1104,7 +1104,9 @@ mod tests {
             // parts) and a judgment placed by a validated AI proposal: 25 + 9 = 34. Its G3 review:
             // the stale and calculated cells counted apart: 34 + 2 = 36.
             // FR7 (2026-10-01): « aucun » of the study's quality-flags line: 36 + 1 = 37.
-            37,
+            // FR23 owner decision C (2026-10-03): a current price with no recorded origin is
+            // « date inconnue » (GATE_UNKNOWN_DATE): 37 + 1 = 38, measured.
+            38,
             "engine.rs label inventory changed — register the new label"
         );
     }

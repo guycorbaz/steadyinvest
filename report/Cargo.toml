@@ -15,6 +15,9 @@ rust_decimal = { workspace = true }   # exact decimals on the Study → core map
 # Write-only PDF backend (Story 5.6, FR52): precise coordinate control for the faithful SSG grid,
 # pure-Rust, minimal deps (bitflags/itoa/memchr/ryu), no PDF parser → no untrusted-parse advisory.
 pdf-writer = { workspace = true }
+# The FR23 price age reads a stamp's day in the owner's local time zone (owner decision
+# 2026-10-03, `price_age::DayZone`) — the workspace's vetted date crate, already in the lock tree.
+chrono = { workspace = true }
 
 [dev-dependencies]
 uuid = { workspace = true }   # fixture study ids in the renderer tests

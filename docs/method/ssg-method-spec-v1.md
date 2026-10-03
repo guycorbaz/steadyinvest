@@ -321,7 +321,10 @@ périmé ») until the next successful refresh (réconcilié 2026-10-01 : PR #27
 fetched or typed, is also stale once older than the age horizon — a whole number of trading days
 (Monday–Friday, no holiday calendar), one by default, set in Réglages — counted from its session date,
 else the date it was fetched or typed; the age is computed at read time, never stored (réconcilié
-2026-10-01 : décision Guy, horizon d'âge du cours).
+2026-10-01 : décision Guy, horizon d'âge du cours). The days are counted in the owner's local time;
+a current price with no recorded origin (written before origins were recorded) has an unknown date
+and is stale too — the verdict provisional, naming « Prix actuel — date inconnue » — until it is
+typed or fetched again (réconcilié 2026-10-03 : décisions Guy, revue PR #293).
 
 ## 6. Banned-verb list (FR13) — posture gate
 

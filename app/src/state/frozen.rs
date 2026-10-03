@@ -32,7 +32,7 @@ impl JournalState {
             Err(steadyinvest_report::form::NotFrozen::NotFull) => {
                 let list = steadyinvest_report::form::build_snapshot(&study)
                     .ok()
-                    .and_then(|snapshot| engine::open_inputs(&snapshot))
+                    .and_then(|snapshot| engine::open_inputs(&snapshot, &study))
                     .unwrap_or_default();
                 return Err(MSG_FREEZE_NOT_FULL.replace("{list}", &list));
             }

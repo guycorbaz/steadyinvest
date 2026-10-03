@@ -381,6 +381,6 @@ pub fn strip_of(study: &Study, now: &Timestamp, format: NumberFormat) -> StripVi
         steadyinvest_core::verdict::Verdict::Provisional(_) => CurrentState::Provisional,
         steadyinvest_core::verdict::Verdict::Withheld(_) => CurrentState::Withheld,
     };
-    let open = crate::viewmodel::engine::open_inputs(&frame.snapshot);
+    let open = crate::viewmodel::engine::open_inputs(&frame.snapshot, study);
     strip(study, &current, state, open.as_deref(), format)
 }

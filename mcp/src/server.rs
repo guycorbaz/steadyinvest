@@ -96,6 +96,8 @@ impl ServerHandler for SteadyMcp {
                         .and_then(|config| steadyinvest_paths::read_price_stale_after(&config))
                         .as_deref(),
                 ),
+                // Decision D (Guy 2026-10-03): the trading day is the owner's local day.
+                day_zone: steadyinvest_report::price_age::DayZone::Local,
             };
             tools::call(&name, arguments, &env)
         })

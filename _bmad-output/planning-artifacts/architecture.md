@@ -477,11 +477,20 @@ against this skeleton as the principal go/no-go before committing UI work.
   day (retyped, or fetched without a session date) renews its origin
   (`price_age::same_price_renews`); the same day or session stays a no-op. The MCP `get_study`
   states the age as `computed.price_aged` + `computed.price_stale_after_trading_days`, since the
-  study JSON's `freshness` carries only a failed refresh's flag. No holiday calendar: after an
-  exchange holiday the last close is stale at horizon 1 until the next close. Pending owner
-  decisions, each one place in `report::price_age`: the day is read in UTC (`Day::of`), and a price
-  with no recorded origin never ages (`unknown_origin_is_aged`) (réconcilié 2026-10-03 : revue
-  PR #293). An unknown symbol's notice
+  study JSON's `freshness` carries only a failed refresh's flag. No holiday calendar (accepted
+  limitation): after an exchange holiday the last close is stale at horizon 1 until the next close
+  (réconcilié 2026-10-03 : revue PR #293). Decided (Guy, 2026-10-03), each one place in
+  `report::price_age` (réconcilié 2026-10-03 : décisions Guy, revue PR #293): the trading day —
+  « today » and the day of a stamp — is the owner's **local** day (`DayZone::day_of`; `Local` in
+  the app and the MCP server, injected with the app `Clock` — `FixedClock` reads UTC — so no test
+  depends on the machine's zone); a provider session date is a date, taken as given. A present
+  price with **no recorded origin** (written before origins were recorded) has an unknown date
+  (`PriceAge::UnknownDate`): its gate is `Stale` (`form::price_to_gate_state`), the verdict
+  provisional with the open gate « Prix actuel — date inconnue » (distinct from « périmé »); the
+  traceability says « origine non enregistrée — date inconnue », the PDF « Origine du cours actuel :
+  non enregistrée — date inconnue ». Writing the price again — retyped or fetched, even the same
+  value — records an origin and makes it fresh (`same_price_renews` treats a missing origin as
+  renewable). No current price at all stays the missing-input path. An unknown symbol's notice
   names the app's ticker convention (`.DE` → `.XETRA`, `.AX` → `.AU`; `ingestion::ticker`). A
   provider listing currency different from the study's is **refused** before anything is applied,
   as is a listing quoted in hundredths (GBX, GBp, ZAc, ILA); statements reported in another
@@ -923,7 +932,10 @@ and architecture decisions A1–A13 below are final._
   threshold only), shared by `app` and `mcp` — and `computed.quality_flags_assessable` tells an empty
   list meaning « none » from « not assessable » (réconcilié 2026-10-01 : PR #285). `computed` also
   carries `price_aged` and `price_stale_after_trading_days` — the current price's FR23 age on this
-  read and the horizon used (réconcilié 2026-10-03 : revue PR #293).
+  read and the horizon used (réconcilié 2026-10-03 : revue PR #293) — and `price_age`
+  (`"fresh"` | `"aged"` | `"unknown"`, `null` without a price): `"unknown"` is a price with no
+  recorded origin, stale like `"aged"` (`price_aged` true for both) but told apart from it
+  (réconcilié 2026-10-03 : décision Guy C).
 
 ### A2 — Per-call connection, no lock, version gate
 

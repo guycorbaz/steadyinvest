@@ -78,6 +78,8 @@ editHistory:
   - date: '2026-10-01'
     changes: "H3 text reconciliation (Epic 8 retro action H3, widened by the 2026-10-01 project review, revue-projet-2026-10-01/p1-*.md and p2-ecarts-textes.md): the text now states what main does, each changed passage tagged « réconcilié 2026-10-01 ». FR20 + Journey 2b + scope (a divergent refresh freezes a ✓ cell, provider value parked — issue #110 / PR #123); FR33 [P1] (app-side dimmed seeds and « hist. » chips — issue #121 / PR #137); FR68 (current verdict always live, difference shown on any change, no FX in a study verdict — D11 / A13 / story 8.8 decision 1; [P4] label); FR60 (the G2 round-3 entry above is corrected: an older build refuses only the drafts table, it silently drops notes, AI marks and the frozen verdict — D9 withdrawn, story 8.1); FR41 + Appendix A (one default withholding rate, configurable, per-entry override — story 6.4); FR3 (projection window, 5-year horizon — story 2.11); FR28 (the rate's date is its freshness state — story 6.6); FR62 (help = glossary hub in Réglages; demo reachable from the study list — story 2.13, PR #279/#284); FR67 (sync folder: warning + recommendation, manual backups — story 5.5); FR5/FR10/FR12/FR23/FR50/FR63 updated for the fixes of PRs #274–#286 (listing-currency refusal, stale fetched price degrades the verdict, confrontation from the frozen band, zone nouns follow the label set). Owner decisions still open are marked « Décision en attente (Guy) » (price age horizon, mixed statement currency, GBX, comparison/PDF neutral wording, confrontation re-validation date) — not decided here. Earlier entries kept unchanged."
   - date: '2026-10-03'
+    changes: "Owner decisions on PR #293 (Guy 2026-10-03): FR12 + Appendix A — a current price with no recorded origin has an unknown date and counts as stale (« Prix actuel — date inconnue », traceability, PDF, MCP `computed.price_age`); the trading day is counted in local time; no holiday calendar, limitation accepted. The « Décision en attente (Guy) » on these points is replaced by the decided rule, tagged « réconcilié 2026-10-03 »."
+  - date: '2026-10-03'
     changes: "Review of PR #293: FR12 names the age horizon as a cause of a stale price; FR23 + Appendix A state the no-holiday-calendar limitation, the same-price renewal on a later day, the frozen-verdict difference once a price ages and the MCP `computed.price_aged`. Tagged « réconcilié 2026-10-03 »."
   - date: '2026-10-01'
     changes: "FR23 + Appendix A: the price age horizon is implemented (owner decision Guy 2026-10-01) — a current price, fetched or typed, older than N trading days (Monday–Friday, default 1, set in Réglages) is stale and the verdict provisional; computed at read time, never stored. Tagged « réconcilié 2026-10-01 »."
@@ -782,6 +784,8 @@ withholding-refund tracking, export/share, eventual public release.
   input is not validated or the study is low-confidence (Appendix A defines "load-bearing input").
   A stale current price — flagged by a failed refresh, or older than the age horizon of FR23 — makes
   the verdict provisional, naming « Prix actuel — périmé » (réconcilié 2026-10-03 : revue PR #293);
+  a current price with no recorded origin has an unknown date and makes it provisional too, naming
+  « Prix actuel — date inconnue » (réconcilié 2026-10-03 : décision Guy);
   the price's origin (provider and session, or typed) is recorded and shown
   in the traceability and the study PDF (réconcilié 2026-10-01 : PR #274, PR #286).
 - FR13 **[P1]:** All **app-generated** signals are **neutral** — no app output contains an
@@ -1155,8 +1159,15 @@ withholding-refund tracking, export/share, eventual public release.
   same provider session, changes nothing); a validated study whose price ages shows « Le verdict
   actuel diffère du verdict figé » (FR68), its current verdict being provisional; the MCP
   `get_study` states the age as `computed.price_aged` with the horizon used
-  (`computed.price_stale_after_trading_days`). The day is read in UTC and a price with no recorded
-  origin never ages — both « Décision en attente (Guy) ».
+  (`computed.price_stale_after_trading_days`). Decided by the owner (réconcilié 2026-10-03 :
+  décisions Guy, revue PR #293): the trading day — today and the day a price was fetched or typed —
+  is counted in the owner's **local** time (a provider's session date is taken as given); a current
+  price with **no recorded origin** (written before origins were recorded) has an unknown date and
+  counts as stale — the verdict provisional, naming « Prix actuel — date inconnue » (distinct from
+  « périmé »), the traceability and the study PDF saying its date is unknown, the MCP `get_study`
+  `computed.price_age` = `"unknown"` (else `"fresh"` / `"aged"`) with `price_aged` true; retyping
+  or fetching the price records its origin and makes it fresh; a study with no current price is
+  unchanged (missing input). The absence of a holiday calendar is an accepted limitation.
 - **Neutrality (FR13):** app-generated signals contain **no imperative action verb** (buy/sell/
   hold as a command); they state facts only. (Exact banned-verb list finalized in Architecture.)
   Scope rule: AI-origin text is outside the banned-verb gate; it is always shown inside a frame

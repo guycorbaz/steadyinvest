@@ -1422,12 +1422,17 @@ fn jj_mm_aaaa(ts: &str) -> String {
 
 /// FR11 (2026-10-01): « Origine du cours actuel : fournisseur, séance du JJ/MM/AAAA » (or the fetch
 /// date), « manuel, saisi le … », « — périmé » after a failed refresh or past the age horizon
-/// (FR23 — the caller renders a study read through `price_age::apply_price_age`); `None` when not
-/// recorded.
+/// (FR23 — the caller renders a study read through `price_age::apply_price_age`); « non
+/// enregistrée — date inconnue » for a price with no recorded origin (owner decision C, Guy
+/// 2026-10-03: its date is unknown, the verdict provisional). `None` without a current price.
 fn price_origin_line(study: &Study) -> Option<String> {
     use steadyinvest_contract::Source;
     study.judgment.current_price?;
-    let o = study.judgment.current_price_origin.as_ref()?;
+    let Some(o) = study.judgment.current_price_origin.as_ref() else {
+        return Some(format!(
+            "{PRICE_ORIGIN} {PRICE_ORIGIN_UNRECORDED}{PRICE_DATE_UNKNOWN}"
+        ));
+    };
     let what = match (o.source, &o.session_date) {
         (Source::Provider, Some(session)) => PRICE_FROM_SESSION.replace("{}", &jj_mm_aaaa(session)),
         (Source::Provider, None) => PRICE_FETCHED_ON.replace("{}", &jj_mm_aaaa(&o.at.0)),
@@ -1442,6 +1447,8 @@ const PRICE_FROM_SESSION: &str = "fournisseur, séance du {}";
 const PRICE_FETCHED_ON: &str = "fournisseur, récupéré le {}";
 const PRICE_TYPED_ON: &str = "manuel, saisi le {}";
 const PRICE_STALE: &str = " — périmé";
+const PRICE_ORIGIN_UNRECORDED: &str = "non enregistrée";
+const PRICE_DATE_UNKNOWN: &str = " — date inconnue";
 
 /// FR7 (2026-10-01): the label of the quality-flags line of the Synthèse.
 const FLAGS_LINE: &str = "Signaux de qualité :";
@@ -1642,6 +1649,8 @@ const REPORT_USER_FACING: &[&str] = &[
     PRICE_FETCHED_ON,
     PRICE_TYPED_ON,
     PRICE_STALE,
+    PRICE_ORIGIN_UNRECORDED,
+    PRICE_DATE_UNKNOWN,
     "plus haut de l'année en cours :",
     "plus bas de l'année en cours :",
     // §4.
@@ -4284,6 +4293,14 @@ mod tests {
     #[test]
     fn a_frozen_verdict_prints_its_block_and_its_difference() {
         let mut study = demo_study();
+        // Only a full verdict freezes: the price needs a recorded origin (decision C, 2026-10-03).
+        study.judgment.current_price_origin = Some(steadyinvest_contract::PriceOrigin {
+            source: steadyinvest_contract::Source::Manual,
+            at: Timestamp("2026-09-30T09:00:00Z".to_string()),
+            session_date: None,
+            freshness: steadyinvest_contract::Freshness::Current,
+            aged: false,
+        });
         let frame = crate::form::build_frame(&study).unwrap();
         let mut frozen = crate::form::verdict_record(
             &study,
@@ -4344,8 +4361,11 @@ mod tests {
         // study that carries no AI origin.
         let point = render_study_pdf(&demo_study(), NumberStyle::Point).unwrap();
         let comma = render_study_pdf(&demo_study(), NumberStyle::Comma).unwrap();
-        assert_eq!((point.len(), fnv64(&point)), (22307, 0xbf09_23b9_616e_f393));
-        assert_eq!((comma.len(), fnv64(&comma)), (22307, 0x17c1_a1e9_ff03_a7e5));
+        // Owner decision C (2026-10-03): this fixture's price has no recorded origin, so the PDF
+        // now prints « Origine du cours actuel : non enregistrée — date inconnue » — re-pinned
+        // (22307 → 22498 bytes), still with no AI origin.
+        assert_eq!((point.len(), fnv64(&point)), (22498, 0x5017_7d2d_77e3_cf1f));
+        assert_eq!((comma.len(), fnv64(&comma)), (22498, 0x32b6_a853_54f2_4111));
     }
 
     #[test]
@@ -5241,7 +5261,8 @@ mod tests {
         }
     }
 
-    // FR11 (2026-10-01): the price's origin under « Cours actuel », only when recorded.
+    // FR11 (2026-10-01): the price's origin under « Cours actuel »; an unrecorded one says the
+    // date is unknown (decision C, 2026-10-03).
     #[test]
     fn the_price_origin_is_printed_when_recorded() {
         use steadyinvest_contract::{Freshness, PriceOrigin, Source, Timestamp};
@@ -5270,5 +5291,16 @@ mod tests {
             &bytes,
             "Origine du cours actuel : manuel, saisi le 01/10/2026"
         ));
+        // Owner decision C (2026-10-03): no recorded origin — the date is said unknown.
+        study.judgment.current_price_origin = None;
+        let bytes = render_study_pdf(&study, NumberStyle::Comma).unwrap();
+        assert!(contains(
+            &bytes,
+            "Origine du cours actuel : non enregistrée — date inconnue"
+        ));
+        // No current price at all: no origin line (the missing-input path).
+        study.judgment.current_price = None;
+        let bytes = render_study_pdf(&study, NumberStyle::Comma).unwrap();
+        assert!(!contains(&bytes, "Origine du cours actuel"));
     }
 }

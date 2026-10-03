@@ -697,7 +697,7 @@ pub fn verdict_badge(
     let open_gates: Vec<slint::SharedString> = verdict
         .open_gates()
         .iter()
-        .map(|g| open_gate_label(g).into())
+        .map(|g| open_gate_label(g, study).into())
         .collect();
     // The FR8 low-confidence reason, carried as explicit text ON the verdict surface (AC1) — it shows
     // whenever fewer than five usable years exist, independent of the Provisional/Withheld split, and
@@ -824,7 +824,7 @@ pub fn verdict_trace(study: &Study, snapshot: &StudySnapshot, format: NumberForm
     let open_gates: Vec<slint::SharedString> = verdict
         .open_gates()
         .iter()
-        .map(|g| open_gate_label(g).into())
+        .map(|g| open_gate_label(g, study).into())
         .collect();
     TraceState {
         visible: true,
@@ -874,7 +874,9 @@ fn trace_date(stamp: &str) -> String {
 /// The current price's traceability line (Guy's on-screen test 2026-10-01, FR11): its real
 /// origin — the provider with its session date (or fetch date), the owner's typing, or unknown —
 /// and « périmé » after a failed refresh or past the age horizon (FR23, marked at read time —
-/// `report::price_age`). Never « manuel » for a fetched price.
+/// `report::price_age`); with no recorded origin, « date inconnue » (owner decision C,
+/// 2026-10-03 — the verdict's open gate names it the same way). Never « manuel » for a fetched
+/// price.
 fn trace_price(j: &steadyinvest_contract::Judgment, format: NumberFormat) -> String {
     use steadyinvest_contract::Source;
     let shown = match j.current_price {
@@ -882,7 +884,7 @@ fn trace_price(j: &steadyinvest_contract::Judgment, format: NumberFormat) -> Str
         None => return format!("{LBL_CURRENT_PRICE} : {EMPTY_SLOT}"),
     };
     let origin = match &j.current_price_origin {
-        None => TRACE_ORIGIN_UNKNOWN.to_string(),
+        None => format!("{TRACE_ORIGIN_UNKNOWN} — {GATE_UNKNOWN_DATE}"),
         Some(o) => {
             let base = match (o.source, &o.session_date) {
                 (Source::Provider, Some(session)) => {
@@ -1050,13 +1052,18 @@ pub fn forecast_low_option_from_key(key: &str) -> Option<CForecastLowOption> {
 
 /// What keeps the verdict from being full (Story 8.8, « Valider l'étude »): `None` for a Full
 /// verdict; else the open inputs' labels (« BPA 2023 — non validé », …) joined by « , » — or, a
-/// low-confidence study having no open input, its low-confidence label (Decision 5).
-pub fn open_inputs(snapshot: &StudySnapshot) -> Option<String> {
+/// low-confidence study having no open input, its low-confidence label (Decision 5). `study` is the
+/// read the snapshot was built from (it names a price of unknown date — [`open_gate_label`]).
+pub fn open_inputs(snapshot: &StudySnapshot, study: &Study) -> Option<String> {
     let verdict = snapshot.verdict();
     if matches!(verdict, Verdict::Full(_)) {
         return None;
     }
-    let list: Vec<String> = verdict.open_gates().iter().map(open_gate_label).collect();
+    let list: Vec<String> = verdict
+        .open_gates()
+        .iter()
+        .map(|g| open_gate_label(g, study))
+        .collect();
     Some(if list.is_empty() {
         CONFIDENCE_LOW.to_string()
     } else {
@@ -1065,13 +1072,29 @@ pub fn open_inputs(snapshot: &StudySnapshot) -> Option<String> {
 }
 
 /// One open-gate → a fact-stating French line: "<input label> — <state noun>" (e.g. "BPA 2023 —
-/// non validé"). Neutral nouns only (scanned in [`USER_FACING_LABELS`]).
-fn open_gate_label(gate: &OpenGate) -> String {
+/// non validé"). Neutral nouns only (scanned in [`USER_FACING_LABELS`]). The current price's
+/// stale gate is « date inconnue » when the read `study`'s price has no recorded origin (owner
+/// decision C, 2026-10-03 — keyed by that identity, `price_age::current_price_age`, never by the
+/// gate's position), « périmé » otherwise.
+fn open_gate_label(gate: &OpenGate, study: &Study) -> String {
+    use steadyinvest_report::price_age::{PriceAge, current_price_age};
     let input_label = match &gate.input {
         GatedInput::YearField { year, field } => format!("{} {year}", gate_field_label(field)),
         GatedInput::JudgmentInput { name } => gate_judgment_label(name).to_string(),
     };
-    format!("{input_label} — {}", gate_state_noun(gate.state))
+    let unknown_price_date = matches!(
+        gate.input,
+        GatedInput::JudgmentInput {
+            name: "current_price"
+        }
+    ) && gate.state == GateState::Stale
+        && current_price_age(&study.judgment) == Some(PriceAge::UnknownDate);
+    let noun = if unknown_price_date {
+        GATE_UNKNOWN_DATE
+    } else {
+        gate_state_noun(gate.state)
+    };
+    format!("{input_label} — {noun}")
 }
 
 /// The fact-stating French noun for a non-green gate state (the `OpenGate.state` is never
@@ -1204,6 +1227,9 @@ pub const GATE_NON_GREEN: &str = "à reprendre";
 pub const GATE_MISSING: &str = "manquant";
 pub const GATE_NOT_VALIDATED: &str = "non validé";
 pub const GATE_STALE: &str = "périmé";
+/// A current price with no recorded origin (owner decision C, Guy 2026-10-03): its date is
+/// unknown — stale for the verdict, named apart from « périmé ».
+pub const GATE_UNKNOWN_DATE: &str = "date inconnue";
 pub const TREND_UP: &str = "hausse";
 pub const TREND_EVEN: &str = "stable";
 pub const TREND_DOWN: &str = "baisse";
@@ -1256,6 +1282,7 @@ pub const USER_FACING_LABELS: &[&str] = &[
     GATE_MISSING,
     GATE_NOT_VALIDATED,
     GATE_STALE,
+    GATE_UNKNOWN_DATE,
     TREND_UP,
     TREND_EVEN,
     TREND_DOWN,
@@ -1346,7 +1373,13 @@ mod tests {
     fn full_judgment() -> Judgment {
         Judgment {
             ai_placed: Default::default(),
-            current_price_origin: None,
+            current_price_origin: Some(steadyinvest_contract::PriceOrigin {
+                source: steadyinvest_contract::Source::Manual,
+                at: steadyinvest_contract::Timestamp("2026-03-09T09:30:00Z".to_string()),
+                session_date: None,
+                freshness: steadyinvest_contract::Freshness::Current,
+                aged: false,
+            }),
             estimated_high_eps: Some(money("8")),
             estimated_low_eps: Some(money("3")),
             projected_sales_growth_pct: Some(money("10")),
@@ -2229,7 +2262,7 @@ mod tests {
         j.current_price_origin = None;
         assert_eq!(
             trace_price(&j, NumberFormat::Comma),
-            "Prix actuel : 227,21 (origine non enregistrée)"
+            "Prix actuel : 227,21 (origine non enregistrée — date inconnue)"
         );
         j.current_price = None;
         assert_eq!(trace_price(&j, NumberFormat::Comma), "Prix actuel : —");

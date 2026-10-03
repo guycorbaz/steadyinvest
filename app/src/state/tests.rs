@@ -10963,7 +10963,7 @@ mod price_origin {
 
     fn verdict_open(state: &JournalState, id: Uuid) -> Option<String> {
         let study = state.get_study(id).unwrap();
-        engine::open_inputs(&engine::build_snapshot(&study).unwrap())
+        engine::open_inputs(&engine::build_snapshot(&study).unwrap(), &study)
     }
 
     #[test]
@@ -11290,6 +11290,64 @@ mod price_origin {
         assert_eq!(o.at.0, "2026-09-29T10:00:00Z", "untouched");
         assert!(o.aged);
         assert_eq!(state.undo_depth(), depth);
+    }
+
+    /// Drop the price's origin — a price written before origins were recorded.
+    fn unrecorded(state: &mut JournalState, id: Uuid) {
+        state
+            .mutate_study(id, |s| s.judgment.current_price_origin = None)
+            .unwrap();
+    }
+
+    // Owner decision C (Guy 2026-10-03): a price with no recorded origin has an unknown date — the
+    // verdict is provisional, its open gate « Prix actuel — date inconnue » (not « périmé »).
+    // Retyping the same value, or fetching the same quote, records an origin: fresh again.
+    #[test]
+    fn a_price_without_origin_is_of_unknown_date_until_written_again() {
+        let dir = TempDir::new().unwrap();
+        let mut state = undo_state(&dir, 0xA4, NOW);
+        let id = state.create_study("NESN", "CHF").unwrap();
+        state
+            .apply_provider_refresh(id, &fetched_with_price(&YEARS, 60))
+            .unwrap();
+        ready(&mut state, id);
+        assert_eq!(verdict_open(&state, id), None, "recorded today: Full");
+        unrecorded(&mut state, id);
+        assert_eq!(origin(&state, id), None, "no mark invented on read");
+        let open = verdict_open(&state, id).expect("no longer Full");
+        assert!(open.contains("Prix actuel — date inconnue"), "{open}");
+        assert!(!open.contains("périmé"), "{open}");
+        // The same value retyped: a real write that records the owner's origin.
+        let depth = state.undo_depth();
+        state
+            .set_judgment_field(id, "current_price", Some(und_money(60)))
+            .unwrap();
+        let o = origin(&state, id).unwrap();
+        assert_eq!(
+            (o.source, o.at.0.as_str(), o.aged),
+            (Source::Manual, NOW, false)
+        );
+        assert_eq!(verdict_open(&state, id), None, "retyped: Full");
+        assert_eq!(state.undo_depth(), depth + 1, "a real write, undoable");
+        // The same quote fetched again (here for an old session): the origin is recorded too.
+        unrecorded(&mut state, id);
+        state
+            .apply_holding_price(
+                id,
+                rust_decimal::Decimal::new(60, 0),
+                Some("2026-09-30".to_string()),
+            )
+            .unwrap();
+        let o = origin(&state, id).unwrap();
+        assert_eq!(
+            (o.source, o.session_date.as_deref()),
+            (Source::Provider, Some("2026-09-30"))
+        );
+        assert_eq!(verdict_open(&state, id), None, "fetched: Full");
+        // No price at all: the missing-input path, never « date inconnue ».
+        state.set_judgment_field(id, "current_price", None).unwrap();
+        let open = verdict_open(&state, id).expect("no price: not Full");
+        assert!(open.contains("Prix actuel — manquant"), "{open}");
     }
 }
 
