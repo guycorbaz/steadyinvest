@@ -49,6 +49,7 @@ fn new_study(id: u128, ticker: &str, currency: &str, at: &str) -> Study {
         company_name: None,
         notes: Vec::new(),
         frozen_verdict: None,
+        listing_subunit: None,
         created_at: ts(at),
         schema_version: SCHEMA_VERSION,
     }

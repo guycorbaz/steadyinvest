@@ -236,7 +236,7 @@ export component PeHistoryChart inherits Rectangle {
                         x: root.chart.chart-w * 1px - pe-strip-bg.x - parent.width / 2;
                         y: root.active-y * 1px - self.height - Tokens.space-4;
                     }
-                    if root.active-y < 0.0: Text {
+                    if root.active-y < 0.0 && !Studies.demo-active: Text {
                         text: "⇕";
                         color: Tokens.text-low;
                         font-size: Tokens.font-h3;
@@ -245,6 +245,8 @@ export component PeHistoryChart inherits Rectangle {
                     }
 
                     pe-strip := TouchArea {
+                        // The read-only demo has no study to write to: no grab cursor, no hint, no gesture.
+                        enabled: !Studies.demo-active;
                         mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.grab;
                         // Issue #187: the enclosing Flickable captures a gesture at press time, so it
                         // must already be non-interactive when the press lands — hover is the earliest

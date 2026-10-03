@@ -8,7 +8,7 @@
 
 use std::rc::Rc;
 
-use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use steadyinvest_persistence::StudySummary;
 use uuid::Uuid;
 
@@ -636,9 +636,11 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
                 });
             // FR63 (owner decision, Guy 2026-10-01): the study is part of the NAIC methodology —
             // its PDF says the zone nouns of the label set in force, as the study screen does.
+            // Owner decision D (2026-10-03): the price origin's date in the price age's zone.
             let extras = steadyinvest_report::StudyPdfExtras {
                 quality_flags: flags.as_deref(),
                 zones: crate::labels::zone_nouns(config.borrow().label_set),
+                day_zone: journal_state.borrow().day_zone(),
             };
             let bytes = match steadyinvest_report::render_study_pdf_with(&study, numbers, &extras) {
                 Ok(bytes) => bytes,
@@ -841,13 +843,19 @@ pub(crate) fn wire_studies(ui: &MainWindow, s: &Session) {
         let path = config_path.clone();
         let current_study = Rc::clone(current_study);
         ui.global::<Studies>().on_toggle_fold(move |index, open| {
-            let Some(id) = current_study.borrow().clone() else {
-                return;
-            };
             if !(0..regime::SECTION_COUNT as i32).contains(&index) {
                 return;
             }
             let ui = ui_weak.unwrap();
+            let Some(id) = current_study.borrow().clone() else {
+                // The read-only demo has no study to remember a fold for: it folds for the visit
+                // only (2026-10-01: its chevrons were dead), nothing reaches the config.
+                let studies = ui.global::<Studies>();
+                if studies.get_demo_active() {
+                    studies.get_folds().set_row_data(index as usize, open);
+                }
+                return;
+            };
             let new_state = {
                 let mut cfg = config.borrow_mut();
                 let entry = cfg.study_view_state.entry(id).or_default();

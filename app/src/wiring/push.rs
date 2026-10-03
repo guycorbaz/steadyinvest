@@ -342,7 +342,7 @@ pub(crate) fn push_frozen(
         studies.set_freeze_open_list(viewmodel::history::HIST_EMPTY_SLOT.into());
         return;
     };
-    let open = viewmodel::engine::open_inputs(&frame.snapshot);
+    let open = viewmodel::engine::open_inputs(&frame.snapshot, study);
     studies.set_freeze_open_list(open.clone().unwrap_or_default().into());
     let current = steadyinvest_report::form::verdict_record(
         study,

@@ -17,14 +17,15 @@ pub mod comparison;
 pub mod form;
 pub mod frozen;
 pub mod pdf;
+pub mod price_age;
 pub mod quick_screen;
 pub mod review;
 pub mod zones;
 
 pub use comparison::{Comparison, ComparisonColumn, average_years, render_comparison};
 pub use pdf::{
-    JUDGED_NOTE, JUDGED_SIGIL, NumberStyle, ReportError, StudyPdfExtras, render_study_pdf,
-    render_study_pdf_with,
+    JUDGED_NOTE, JUDGED_SIGIL, LISTING_SUBUNIT_LINE, NumberStyle, ReportError, StudyPdfExtras,
+    listing_subunit_note, render_study_pdf, render_study_pdf_with,
 };
 pub use quick_screen::{QuickScreen, QuickScreenLadder, QuickScreenPriceRow, render_quick_screen};
 pub use review::{DueLine, PortfolioReview, ReviewLine, ShareLine, render_portfolio_review};

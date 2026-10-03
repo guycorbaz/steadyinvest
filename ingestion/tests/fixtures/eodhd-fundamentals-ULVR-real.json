@@ -1,0 +1,212 @@
+{
+ "General": {
+  "CurrencyCode": "GBX",
+  "Sector": "Consumer Defensive"
+ },
+ "Highlights": {
+  "EarningsShare": 2.18
+ },
+ "Financials": {
+  "Income_Statement": {
+   "yearly": {
+    "2014-12-31": {
+     "currency_symbol": "EUR",
+     "totalRevenue": "48436000000.00",
+     "incomeBeforeTax": "7646000000.00",
+     "netIncome": "5171000000.00",
+     "netIncomeApplicableToCommonShares": "5171000000.00"
+    },
+    "2015-12-31": {
+     "currency_symbol": "EUR",
+     "totalRevenue": "53272000000.00",
+     "incomeBeforeTax": "7220000000.00",
+     "netIncome": "4909000000.00",
+     "netIncomeApplicableToCommonShares": "4909000000.00"
+    },
+    "2016-12-31": {
+     "currency_symbol": "EUR",
+     "totalRevenue": "52713000000.00",
+     "incomeBeforeTax": "7469000000.00",
+     "netIncome": "5184000000.00",
+     "netIncomeApplicableToCommonShares": "5184000000.00"
+    },
+    "2017-12-31": {
+     "currency_symbol": "EUR",
+     "totalRevenue": "53715000000.00",
+     "incomeBeforeTax": "8153000000.00",
+     "netIncome": "6053000000.00",
+     "netIncomeApplicableToCommonShares": "6053000000.00"
+    },
+    "2018-12-31": {
+     "currency_symbol": "EUR",
+     "totalRevenue": "50982000000.00",
+     "incomeBeforeTax": "12383000000.00",
+     "netIncome": "9389000000.00",
+     "netIncomeApplicableToCommonShares": "9369000000.00"
+    },
+    "2019-12-31": {
+     "currency_symbol": "EUR",
+     "totalRevenue": "51980000000.00",
+     "incomeBeforeTax": "8289000000.00",
+     "netIncome": "5625000000.00",
+     "netIncomeApplicableToCommonShares": "5625000000.00"
+    },
+    "2020-12-31": {
+     "currency_symbol": "EUR",
+     "totalRevenue": "50724000000.00",
+     "incomeBeforeTax": "7996000000.00",
+     "netIncome": "5581000000.00",
+     "netIncomeApplicableToCommonShares": "5581000000.00"
+    },
+    "2021-12-31": {
+     "currency_symbol": "EUR",
+     "totalRevenue": "52444000000.00",
+     "incomeBeforeTax": "8556000000.00",
+     "netIncome": "6049000000.00",
+     "netIncomeApplicableToCommonShares": "6049000000.00"
+    },
+    "2022-12-31": {
+     "currency_symbol": "EUR",
+     "totalRevenue": "60073000000.00",
+     "incomeBeforeTax": "10337000000.00",
+     "netIncome": "7642000000.00",
+     "netIncomeApplicableToCommonShares": "7642000000.00"
+    },
+    "2023-12-31": {
+     "currency_symbol": "EUR",
+     "totalRevenue": "59604000000.00",
+     "incomeBeforeTax": "9339000000.00",
+     "netIncome": "6487000000.00"
+    },
+    "2024-12-31": {
+     "currency_symbol": "EUR",
+     "totalRevenue": "60761000000.00",
+     "incomeBeforeTax": "8869000000.00",
+     "netIncome": "5744000000.00"
+    },
+    "2025-12-31": {
+     "currency_symbol": "EUR",
+     "totalRevenue": "50503000000.00",
+     "incomeBeforeTax": "8537026000.00",
+     "netIncome": "5985934000.00"
+    }
+   }
+  },
+  "Balance_Sheet": {
+   "yearly": {
+    "2014-12-31": {
+     "currency_symbol": "EUR",
+     "commonStockSharesOutstanding": "2562311000.00",
+     "totalStockholderEquity": "13651000000.00"
+    },
+    "2015-12-31": {
+     "currency_symbol": "EUR",
+     "commonStockSharesOutstanding": "2855400000.00",
+     "totalStockholderEquity": "15439000000.00"
+    },
+    "2016-12-31": {
+     "currency_symbol": "EUR",
+     "commonStockSharesOutstanding": "2536800000.00",
+     "totalStockholderEquity": "16355000000.00"
+    },
+    "2017-12-31": {
+     "currency_symbol": "EUR",
+     "commonStockSharesOutstanding": "2501333000.00",
+     "totalStockholderEquity": "13629000000.00"
+    },
+    "2018-12-31": {
+     "currency_symbol": "EUR",
+     "commonStockSharesOutstanding": "2694800000.00",
+     "totalStockholderEquity": "11572000000.00"
+    },
+    "2019-12-31": {
+     "currency_symbol": "EUR",
+     "commonStockSharesOutstanding": "2334844000.00",
+     "totalStockholderEquity": "13192000000.00"
+    },
+    "2020-12-31": {
+     "currency_symbol": "EUR",
+     "commonStockSharesOutstanding": "2337600000.00",
+     "totalStockholderEquity": "15266000000.00"
+    },
+    "2021-12-31": {
+     "currency_symbol": "EUR",
+     "commonStockSharesOutstanding": "2319644000.00",
+     "totalStockholderEquity": "17107000000.00"
+    },
+    "2022-12-31": {
+     "currency_symbol": "EUR",
+     "commonStockSharesOutstanding": "2620300000.00",
+     "totalStockholderEquity": "19021000000.00"
+    },
+    "2023-12-31": {
+     "currency_symbol": "EUR",
+     "commonStockSharesOutstanding": "2251022000.00",
+     "totalStockholderEquity": "18102000000.00"
+    },
+    "2024-12-31": {
+     "currency_symbol": "EUR",
+     "commonStockSharesOutstanding": "2228533000.00",
+     "totalStockholderEquity": "19990000000.00"
+    },
+    "2025-12-31": {
+     "currency_symbol": "EUR",
+     "commonStockSharesOutstanding": "2195300000.00",
+     "totalStockholderEquity": "15548991000.00"
+    }
+   }
+  },
+  "Cash_Flow": {
+   "yearly": {
+    "2014-12-31": {
+     "currency_symbol": "EUR",
+     "dividendsPaid": "3189000000.00"
+    },
+    "2015-12-31": {
+     "currency_symbol": "EUR",
+     "dividendsPaid": "3331000000.00"
+    },
+    "2016-12-31": {
+     "currency_symbol": "EUR",
+     "dividendsPaid": "3609000000.00"
+    },
+    "2017-12-31": {
+     "currency_symbol": "EUR",
+     "dividendsPaid": "3916000000.00"
+    },
+    "2018-12-31": {
+     "currency_symbol": "EUR",
+     "dividendsPaid": "4066000000.00"
+    },
+    "2019-12-31": {
+     "currency_symbol": "EUR",
+     "dividendsPaid": "4209000000.00"
+    },
+    "2020-12-31": {
+     "currency_symbol": "EUR",
+     "dividendsPaid": "4279000000.00"
+    },
+    "2021-12-31": {
+     "currency_symbol": "EUR",
+     "dividendsPaid": "4483000000.00"
+    },
+    "2022-12-31": {
+     "currency_symbol": "EUR",
+     "dividendsPaid": "4329000000.00"
+    },
+    "2023-12-31": {
+     "currency_symbol": "EUR",
+     "dividendsPaid": "4363000000.00"
+    },
+    "2024-12-31": {
+     "currency_symbol": "EUR",
+     "dividendsPaid": "4319000000.00"
+    },
+    "2025-12-31": {
+     "currency_symbol": "EUR",
+     "dividendsPaid": "4372599000.00"
+    }
+   }
+  }
+ }
+}

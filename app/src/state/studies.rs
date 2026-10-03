@@ -199,12 +199,32 @@ impl JournalState {
     /// Fallible reopen (issue #95): `Ok(Some)` found, `Ok(None)` truly absent (also when no
     /// journal is open), `Err` on a read FAILURE (logged) — so a consumer can say
     /// « indisponible » instead of the factually wrong « n'existe pas ».
+    ///
+    /// FR23 age horizon (owner decision 2026-10-01): every study read here carries the age of its
+    /// current price on the injected clock's today ([`steadyinvest_report::price_age`]) — so the
+    /// verdict (provisional, « Prix actuel — périmé »), the traceability and the PDF name a price
+    /// past the horizon « périmé » the same way, and any verdict computed from this read degrades
+    /// with it. The study list itself names no price age (it shows no price indicator). The mark lives only on the read copy (`PriceOrigin::aged` is never
+    /// serialized): a rail that re-saves the study cannot persist it, and a changed horizon takes
+    /// effect on the next read.
     pub fn try_get_study(&self, id: Uuid) -> Result<Option<Study>, String> {
         let Some(journal) = self.journal.as_ref() else {
             return Ok(None);
         };
-        journal
+        let mut study = journal
             .get_study(id)
-            .map_err(|error| super::read_failure(super::MSG_SUBJECT_STUDY, error))
+            .map_err(|error| super::read_failure(super::MSG_SUBJECT_STUDY, error))?;
+        if let Some(study) = study.as_mut() {
+            self.apply_price_age(study);
+        }
+        Ok(study)
+    }
+
+    /// Mark `study` (a read copy) with the FR23 age horizon on today's clock — for a study read
+    /// outside [`Self::try_get_study`] that is rendered as current.
+    pub fn apply_price_age(&self, study: &mut Study) {
+        let zone = self.clock.day_zone();
+        let today = zone.today(&self.clock.now());
+        steadyinvest_report::price_age::apply_price_age(study, today, self.price_stale_after, zone);
     }
 }
