@@ -1,6 +1,6 @@
 # steadyinvest — SSG Method Specification (v1)
 
-**`method_version`: `ssg-1.2.0`**
+**`method_version`: `ssg-1.3.0`**
 **Status:** authoritative oracle for the calculation engine (`steadyinvest-core`) and its golden tests.
 **Independent project — not affiliated with NAIC / BetterInvesting.** This document specifies the
 *method* (formulas, ratios, thresholds — which are not protectable). It uses **neutral labels** and
@@ -24,6 +24,7 @@ scope here). All money/ratio math is **exact decimal** (`rust_decimal`), never `
 | `ssg-1.0.0` | Initial normative spec. |
 | `ssg-1.1.0` | **Additive, zero behavioral change.** Absorbed as normative text the interpretations recorded while implementing Stories 1.7–1.9 (issues #12, #13, #15) — every rule marked *(absorbed at ssg-1.1.0)* below was already the engine's behavior under `ssg-1.0.0`. |
 | `ssg-1.2.0` | **Additive: the historical inputs are defined (§0).** A year is the company's fiscal year; its high/low prices are the fiscal year's (not the calendar year's); its EPS is the reported diluted EPS (never an adjusted, non-GAAP one). The engine's formulas, thresholds and scales are unchanged; the provider mapping follows §0 from this version (found on a real NVDA.US fetch, 2026-09-26: calendar-year prices beside January-fiscal-year EPS, and EODHD's non-GAAP `epsActual`), so a study fetched under `ssg-1.2.0` can show other figures than the same study fetched before. A stored study keeps its figures until the user fetches again. |
+| `ssg-1.3.0` | **Verdict rule: an undefined U/D ratio meets the « U/D ≥ 3 » criterion (§1, §9).** When the current price is at or below the forecast low the downside is nil and the upside positive: the ratio is unbounded (∞ ≥ 3), the price deep in the buy range [NAIC], so the criterion is **met** — under `ssg-1.2.0` and before it was withheld (unmet by insufficiency). An *unknown* ratio (missing inputs, degenerate range) still withholds it. Formulas, thresholds and scales are unchanged; the rule is a fingerprinted constant (`core::method::UD_UNDEFINED_MEETS_TARGET`). A study priced at or below its forecast low can now be a quality-and-value candidate. A frozen verdict keeps the method it was frozen under and is never recomputed: beside a live verdict computed under `ssg-1.3.0` it reads as differing, the method named as the cause (FR68) (réconcilié 2026-10-03 : décision Guy H). |
 
 ---
 
@@ -211,7 +212,9 @@ Normative details *(absorbed at ssg-1.1.0)*:
 ### Verdict (derived, neutral — see FR13)
 A **fact-only** verdict states the present-price zone and the supporting figures. A study is a
 "quality-and-value" candidate when ALL hold (these are *facts surfaced*, never a recommendation):
-- U/D ratio ≥ **3.0** [Tutorial p20]; **and** relative value < **100%**; **and** present price in the
+- U/D ratio ≥ **3.0** [Tutorial p20] — an **undefined** ratio (§9: current price ≤ forecast low, the
+  upside unbounded) meets it, an *unknown* one does not *(from ssg-1.3.0 —
+  réconcilié 2026-10-03 : décision Guy H)*; **and** relative value < **100%**; **and** present price in the
   **Buy** zone; **and** projected appreciation implies roughly doubling over 5 years (≈ 15%/yr) —
   normative comparator: projected appreciation **≥ 100 %**, inclusive, consistent with the U/D
   `≥ 3.0` criterion *(absorbed at ssg-1.1.0)*. [Tutorial p20]
@@ -423,7 +426,7 @@ division-by-zero panic.
 
 | Case | Rule |
 |------|------|
-| **U/D denominator ≤ 0** (`current_price ≤ forecast_low`; the §4 constraint allows equality) | U/D is **undefined** → verdict withheld for the U/D criterion; surface as a state, not a number — the app shows the state as « ∞ » (unbounded; « illimité » in the PDFs), never « — », which stays for an unknown ratio (réconcilié 2026-10-03 : décision Guy). If `current_price < forecast_low`, also raise `low_price_above_current`. |
+| **U/D denominator ≤ 0** (`current_price ≤ forecast_low`; the §4 constraint allows equality) | U/D is **undefined** → the U/D criterion is **met** (∞ ≥ 3: no downside left, the upside unbounded) — from `ssg-1.3.0` (réconcilié 2026-10-03 : décision Guy H); under `ssg-1.2.0` and before, the verdict withheld it. An *unknown* ratio still withholds it. Surface as a state, not a number — the app shows the state as « ∞ » (unbounded; « illimité » in the PDFs), never « — », which stays for an unknown ratio (réconcilié 2026-10-03 : décision Guy). If `current_price < forecast_low`, also raise `low_price_above_current`. |
 | **CAGR base ≤ 0 or sign-crossing** (start EPS ≤ 0, or start/end opposite signs) | CAGR is **unknown/insufficient** (do not compute `(end/start)^(1/n)`); the affected growth output is `unknown`, never 0. |
 | **Current P/E with TTM EPS ≤ 0** (`Σ last 4 quarterly EPS ≤ 0`) | Current P/E **unknown** → relative value and `relative_value_high` are **unknown** (not computed); verdict's relative-value criterion is unmet-by-insufficiency. |
 | **Per-year P/E with EPS ≤ 0** | that year's P/E is `unknown` (`negative_or_zero_denominator`), excluded from the 5-yr P/E averages. |
@@ -433,7 +436,9 @@ division-by-zero panic.
 
 ## Change control
 Any edit to a formula, threshold, the banned-verb list, the tolerance, the rounding mode, or a display
-scale **must** bump `METHOD_VERSION` (next: `ssg-1.3.0` for additive, `ssg-2.0.0` for breaking). The
+scale **must** bump `METHOD_VERSION` (next: `ssg-1.4.0` for additive, `ssg-2.0.0` for breaking).
+So must a change to a verdict rule (which criterion a state meets — the precedent is `ssg-1.3.0`,
+the undefined U/D ratio), mirrored by a fingerprinted `core::method` constant. The
 `core` change-detection test will fail until the version is bumped and the snapshot regenerated, and
 every golden fixture's `meta.method_version` must be re-validated by hand (§7). A change to what a
 historical input IS (§0) — which period a figure covers, which EPS is used — bumps it too, although

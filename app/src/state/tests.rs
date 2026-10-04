@@ -6078,6 +6078,125 @@ fn archive_and_delete_are_refused_on_a_read_only_journal() {
     );
 }
 
+// ── Owner decision I (Guy 2026-10-03) — a blank date defaults to the LOCAL day ──
+
+/// A fresh journal whose clock is pinned at `ts` and reads its days in `zone` (fixed offsets —
+/// never the machine's zone).
+fn zoned_state(
+    dir: &TempDir,
+    seed: u128,
+    ts: &str,
+    zone: steadyinvest_report::price_age::DayZone,
+) -> JournalState {
+    let path = dir.path().join("journal.db");
+    if !path.exists() {
+        drop(
+            Journal::create(
+                &path,
+                Uuid::from_u128(0xC0FFEE),
+                &Timestamp("2026-06-14T00:00:00Z".to_string()),
+            )
+            .unwrap(),
+        );
+    }
+    let clock: Box<dyn Clock> = Box::new(crate::clock::ZonedClock(Timestamp(ts.to_string()), zone));
+    let idgen: Box<dyn IdGen> = Box::new(crate::clock::SeqIdGen::starting_at(seed));
+    let (state, _) = open_or_create_test(Some(&path), clock, idgen);
+    state
+}
+
+/// Every ledger row's stored stamp, oldest first.
+fn ledger_days(state: &JournalState, id: Uuid) -> Vec<String> {
+    let mut days: Vec<String> = state
+        .holding_ledger(id)
+        .into_iter()
+        .map(|t| t.occurred_at.0)
+        .collect();
+    days.sort();
+    days
+}
+
+/// 00:30 CEST on 3 October is 22:30 UTC on 2 October: a buy, a dividend and the opening row typed
+/// then without a date are the 3rd's (the owner's day), stored as that calendar date at midnight
+/// UTC — not the 2nd's, the UTC day.
+#[test]
+fn a_blank_ledger_date_is_the_local_day_not_the_utc_day() {
+    let zurich_summer = steadyinvest_report::price_age::DayZone::FixedSecondsEast(2 * 3600);
+    let dir = TempDir::new().unwrap();
+    let mut state = zoned_state(&dir, 0x9100, "2026-10-02T22:30:00Z", zurich_summer);
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let id = state.list_holdings()[0].id;
+    state
+        .record_buy_for(id, "", "2", "110", "", "", "CHF")
+        .expect("the buy records");
+    state
+        .record_dividend_for(id, "", "12", "3", "", "", "CHF", "35")
+        .expect("the dividend records");
+    assert_eq!(
+        ledger_days(&state, id),
+        vec![
+            "2026-10-03T00:00:00Z".to_string(),
+            "2026-10-03T00:00:00Z".to_string(),
+            "2026-10-03T00:00:00Z".to_string(),
+        ],
+        "the opening row, the buy and the dividend all fall on the local day"
+    );
+
+    // The same instant read in New York (UTC−4) is still the 2nd there: the zone decides.
+    let dir = TempDir::new().unwrap();
+    let new_york = steadyinvest_report::price_age::DayZone::FixedSecondsEast(-4 * 3600);
+    let mut state = zoned_state(&dir, 0x9200, "2026-10-02T22:30:00Z", new_york);
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let id = state.list_holdings()[0].id;
+    state
+        .record_buy_for(id, "", "2", "110", "", "", "CHF")
+        .expect("the buy records");
+    assert_eq!(
+        ledger_days(&state, id),
+        vec![
+            "2026-10-02T00:00:00Z".to_string(),
+            "2026-10-02T00:00:00Z".to_string(),
+        ]
+    );
+
+    // A typed date is a calendar date, taken as given whatever the zone.
+    let dir = TempDir::new().unwrap();
+    let mut state = zoned_state(&dir, 0x9300, "2026-10-02T22:30:00Z", zurich_summer);
+    state.add_holding("NESN", "10", "100", "CHF", "").unwrap();
+    let id = state.list_holdings()[0].id;
+    state
+        .record_buy_for(id, "2026-09-30", "2", "110", "", "", "CHF")
+        .expect("the buy records");
+    assert!(
+        ledger_days(&state, id).contains(&"2026-09-30T00:00:00Z".to_string()),
+        "{:?}",
+        ledger_days(&state, id)
+    );
+}
+
+/// A blank FX-rate date is the local day too — and the future-date refusal is bounded by the same
+/// local day, so a rate typed at 00:30 CEST is neither filed under the 2nd nor refused as
+/// tomorrow's; the 4th still is.
+#[test]
+fn a_blank_fx_rate_date_is_the_local_day_and_today_is_not_the_future() {
+    let zurich_summer = steadyinvest_report::price_age::DayZone::FixedSecondsEast(2 * 3600);
+    let dir = TempDir::new().unwrap();
+    let mut state = zoned_state(&dir, 0x9400, "2026-10-02T22:30:00Z", zurich_summer);
+    state
+        .upsert_manual_fx_rate("EUR", "0.93", "", "CHF")
+        .expect("the manual rate records");
+    let rates = state.list_fx_rates();
+    assert_eq!(rates.len(), 1);
+    assert_eq!(rates[0].rate_date, "2026-10-03");
+    state
+        .upsert_manual_fx_rate("USD", "0.80", "2026-10-03", "CHF")
+        .expect("the local today is not a future date");
+    assert_eq!(
+        state.upsert_manual_fx_rate("USD", "0.81", "2026-10-04", "CHF"),
+        Err(MSG_FX_FUTURE_DATE.to_string())
+    );
+}
+
 // ── Story 6.5 — FX acquisition: dated, source-aware rates (FR28) ──
 
 #[test]

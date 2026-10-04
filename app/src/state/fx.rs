@@ -123,10 +123,14 @@ impl JournalState {
         let now = self.clock.now();
         // The DAY only (rates are daily facts): reuse the 6.3 real-calendar validation, then keep
         // the date part — `fx_rates.rate_date` stores `AAAA-MM-JJ`.
-        let stamped = normalize_event_date(date_input, &now.0)?;
+        // « Today » is the owner's LOCAL day (owner decision I, Guy 2026-10-03) — both the default
+        // of a blank date and the bound of the future-date refusal, so a rate typed at 00:30 in
+        // Zurich is that day's and is not refused as tomorrow's.
+        let today = self.today_shown();
+        let stamped = normalize_event_date(date_input, &today)?;
         let rate_date = stamped.get(..10).unwrap_or(&stamped).to_string();
         // A future date would win the "latest" arbitration until it arrives (review) — refuse.
-        if rate_date.as_str() > now.0.get(..10).unwrap_or_default() {
+        if rate_date > today {
             return Err(MSG_FX_FUTURE_DATE.to_string());
         }
         let item = FxRateItem {

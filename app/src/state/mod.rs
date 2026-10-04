@@ -450,7 +450,9 @@ impl JournalState {
     }
 
     /// Today's day (`AAAA-MM-JJ`) in [`Self::day_zone`] — the date the comparison, the quick
-    /// screen and the review print (owner decision, Guy 2026-10-03: every shown date is local).
+    /// screen and the review print (owner decision, Guy 2026-10-03: every shown date is local),
+    /// and THE « today » a blank transaction / dividend / FX-rate date defaults to (owner decision
+    /// I, Guy 2026-10-03).
     pub fn today_shown(&self) -> String {
         use steadyinvest_report::price_age::Day;
         self.day_zone().shown(&self.now(), Day::iso)
