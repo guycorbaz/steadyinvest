@@ -136,8 +136,13 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
                     study_notice::outcome(
                         &ui,
                         Source::Edit,
-                        &state::MSG_FREEZE_DONE
-                            .replace("{date}", &crate::viewmodel::frozen::day_month(&at)),
+                        &state::MSG_FREEZE_DONE.replace(
+                            "{date}",
+                            &crate::viewmodel::frozen::day_month(
+                                &at,
+                                journal_state.borrow().day_zone(),
+                            ),
+                        ),
                     );
                 }
                 Err(message) => crate::wiring::dialog::refuse(&ui, &message),
@@ -337,6 +342,7 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
     {
         let ui_weak = ui.as_weak();
         let config = Rc::clone(config);
+        let journal_state = Rc::clone(journal_state);
         let drag_study = Rc::clone(drag_study);
         let drag_moved = Rc::clone(drag_moved);
         ui.global::<Studies>().on_judgment_moved(move |field, y| {
@@ -357,7 +363,7 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
                 return;
             }
             let format = config.borrow().number_format;
-            push_live_preview(&ui, &preview, format);
+            push_live_preview(&ui, &preview, format, journal_state.borrow().day_zone());
         });
     }
 
@@ -474,6 +480,7 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
     {
         let ui_weak = ui.as_weak();
         let config = Rc::clone(config);
+        let journal_state = Rc::clone(journal_state);
         let drag_study = Rc::clone(drag_study);
         let drag_moved = Rc::clone(drag_moved);
         ui.global::<Studies>()
@@ -495,7 +502,7 @@ pub(crate) fn wire_judgment(ui: &MainWindow, s: &Session) {
                     return;
                 }
                 let format = config.borrow().number_format;
-                push_live_preview(&ui, &preview, format);
+                push_live_preview(&ui, &preview, format, journal_state.borrow().day_zone());
             });
     }
 
@@ -656,11 +663,12 @@ fn stepped_outcome(
                 // G3: a step that leaves a frozen verdict in place (a redo, or the undo of a
                 // replace — the earlier verdict is back) names that verdict's date; only a step
                 // that removes it says the validation is undone.
+                let zone = journal_state.borrow().day_zone();
                 let restored = journal_state
                     .borrow()
                     .get_study(id)
                     .and_then(|s| s.frozen_verdict)
-                    .map(|f| crate::viewmodel::frozen::day_month(&f.frozen_at));
+                    .map(|f| crate::viewmodel::frozen::day_month(&f.frozen_at, zone));
                 let text = match restored {
                     Some(date) => state::MSG_FREEZE_DONE.replace("{date}", &date),
                     None => state::MSG_FREEZE_UNDONE.to_string(),

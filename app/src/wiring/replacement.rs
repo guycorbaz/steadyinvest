@@ -86,12 +86,12 @@ fn push_candidates(ui: &MainWindow, state: &JournalState) {
                 .map(&fmt_pct)
                 .unwrap_or_default()
                 .into(),
-            // The same "N:1" rendering as the §4 U/D slot; absent states stay absent.
-            ud: c
-                .ud_ratio
-                .map(|r| format!("{}:1", format_scaled(r, DisplayField::Ratio, format)))
-                .unwrap_or_default()
-                .into(),
+            // THE §4 U/D rendering (`engine::fmt_ud`: « N:1 », « ∞ » when undefined — owner
+            // decision 2026-10-03); an unknown ratio stays absent (no « H/B » line).
+            ud: match c.ud {
+                steadyinvest_core::ssg::UpsideDownside::Unknown => SharedString::new(),
+                ud => crate::viewmodel::engine::fmt_ud(&ud, format).into(),
+            },
             currency: c.currency.unwrap_or_default().into(),
             sector: c.sector.unwrap_or_default().into(),
             sector_flagged: flagged(c.sector_share_pct),

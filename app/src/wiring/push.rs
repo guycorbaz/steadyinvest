@@ -17,10 +17,19 @@ use crate::{
 use crate::{regime, state, viewmodel};
 
 /// A compact display form of an RFC3339 timestamp for the holdings freshness caption (Story 4.4):
-/// `YYYY-MM-DD HH:MM` (drop seconds + zone; the journal stores the full RFC3339 string).
-pub(crate) fn display_timestamp(ts: &steadyinvest_contract::Timestamp) -> String {
-    let s = &ts.0;
-    s.get(..16).unwrap_or(s).replacen('T', " ", 1)
+/// `YYYY-MM-DD HH:MM` in `zone`, the owner's local time (owner decision, Guy 2026-10-03; the
+/// journal stores the full RFC3339 UTC string). An unreadable stamp passes through unchanged.
+pub(crate) fn display_timestamp(
+    ts: &steadyinvest_contract::Timestamp,
+    zone: steadyinvest_report::price_age::DayZone,
+) -> String {
+    match zone.hh_mm(ts) {
+        Some(time) => format!(
+            "{} {time}",
+            zone.shown(ts, steadyinvest_report::price_age::Day::iso)
+        ),
+        None => ts.0.clone(),
+    }
 }
 
 /// Mirror a per-study view-state (regime + fold flags) into the `Studies` global and swap the
@@ -56,7 +65,7 @@ pub(crate) fn push_form(
     // every persisted edit (an edit grows undo + clears redo; undo/redo move between the stacks).
     studies.set_can_undo(state.can_undo());
     studies.set_can_redo(state.can_redo());
-    studies.set_form_header(viewmodel::form::header(study));
+    studies.set_form_header(viewmodel::form::header(study, state.day_zone()));
     studies.set_year_headers(ModelRc::new(VecModel::from(viewmodel::form::year_headers(
         study,
     ))));
@@ -120,9 +129,14 @@ pub(crate) fn push_form(
             studies.set_return_computed(engine::return_computed(outputs, format));
             studies.set_quality_flags(engine::quality_flags_line(outputs, &study.judgment).into());
             studies.set_zone_bar(engine::zone_bar(study, snapshot, format));
-            studies.set_verdict(engine::verdict_badge(study, snapshot, format));
+            studies.set_verdict(engine::verdict_badge(
+                study,
+                snapshot,
+                format,
+                state.day_zone(),
+            ));
             // Story 8.8: the frozen verdict against this live one, and what keeps it from freezing.
-            push_frozen(ui, study, Some(&frame), format);
+            push_frozen(ui, study, Some(&frame), format, state.day_zone());
             // Issue #114: the load-bearing judgment inputs still to fill (drives the field highlight).
             studies.set_required_fields(ModelRc::new(VecModel::from(
                 engine::required_judgment_fields(snapshot),
@@ -186,7 +200,7 @@ pub(crate) fn push_form(
             studies.set_current_price_out_of_scale(false);
             studies.set_zone_bar(ZoneBarState::default());
             studies.set_verdict(VerdictState::default());
-            push_frozen(ui, study, None, format);
+            push_frozen(ui, study, None, format, state.day_zone());
             studies.set_growth_chart(viewmodel::chart::unavailable());
             studies.set_pe_chart(viewmodel::chart::pe_chart_unavailable());
             // Story 8.6: no chart drawn — every pending proposal's chip goes under its field.
@@ -256,7 +270,7 @@ pub(crate) fn push_history(
             // headers are recomputed on what remains; the detail still diffs against the TRUE
             // predecessor (`toggle-history-entry` reads the unfiltered listing).
             let rows: Vec<crate::HistoryEntryRow> = viewmodel::history::visible_history(
-                viewmodel::history::history_entries(&loaded, &drafts, format),
+                viewmodel::history::history_entries(&loaded, &drafts, format, state.day_zone()),
                 studies.get_history_hide_notes(),
             )
             .into_iter()
@@ -294,6 +308,7 @@ pub(crate) fn push_live_preview(
     ui: &MainWindow,
     study: &steadyinvest_contract::Study,
     format: NumberFormat,
+    zone: steadyinvest_report::price_age::DayZone,
 ) {
     use viewmodel::engine;
     let studies = ui.global::<Studies>();
@@ -307,9 +322,9 @@ pub(crate) fn push_live_preview(
         // Issue #115 — the §3 P/E line moves live too (a P/E drag or an est-EPS drag both recompute it).
         studies.set_pe_chart(viewmodel::chart::pe_chart(&frame, &study.judgment, format));
         studies.set_zone_bar(engine::zone_bar(study, snapshot, format));
-        studies.set_verdict(engine::verdict_badge(study, snapshot, format));
+        studies.set_verdict(engine::verdict_badge(study, snapshot, format, zone));
         // Story 8.8: a drag that moves the verdict moves the comparison with it.
-        push_frozen(ui, study, Some(&frame), format);
+        push_frozen(ui, study, Some(&frame), format, zone);
         // §4/§5 judgment-dependent numbers stay in step with the recolouring bar (review P1) — the
         // forecast high/low + U/D, the projected return, and the §4 study-level warning all move
         // with the est-high-EPS the drag sets, so the §4 surface never disagrees with itself.
@@ -334,6 +349,7 @@ pub(crate) fn push_frozen(
     study: &steadyinvest_contract::Study,
     frame: Option<&steadyinvest_report::form::StudyFrame>,
     format: NumberFormat,
+    zone: steadyinvest_report::price_age::DayZone,
 ) {
     use viewmodel::frozen::{CurrentState, StripView, strip};
     let studies = ui.global::<Studies>();
@@ -359,7 +375,7 @@ pub(crate) fn push_frozen(
         current: r.current.clone().into(),
         changed: r.changed,
     };
-    let out = match strip(study, &current, state, open.as_deref(), format) {
+    let out = match strip(study, &current, state, open.as_deref(), format, zone) {
         StripView::None => crate::FrozenStrip::default(),
         StripView::Same { date } => crate::FrozenStrip {
             state: 1,

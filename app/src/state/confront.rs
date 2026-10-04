@@ -103,7 +103,12 @@ impl JournalState {
                 })
                 .unwrap_or((None, None))
         };
-        let day = |t: &steadyinvest_contract::Timestamp| t.0.chars().take(10).collect::<String>();
+        // The decision's day in the owner's zone (owner decision, Guy 2026-10-03: every shown date
+        // is local) — shown « Verdict figé le … » and the first session the trajectory reads.
+        let zone = self.day_zone();
+        let day = |t: &steadyinvest_contract::Timestamp| {
+            zone.shown(t, steadyinvest_report::price_age::Day::iso)
+        };
         let (decision_date, forecast_high, forecast_low, basis) = match &study.frozen_verdict {
             Some(f) => match &f.zones {
                 Some(z) => (

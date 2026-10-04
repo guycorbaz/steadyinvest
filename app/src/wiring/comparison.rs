@@ -267,8 +267,11 @@ pub(crate) fn comparison_columns(
             };
             let (id, mut col) = match state.try_get_study(uuid) {
                 Ok(Some(study)) => match build_frame(&study) {
-                    Ok(frame) => (Some(uuid), comparison_column(&study, &frame, format)),
-                    Err(_) => (Some(uuid), uncomputable_column(&study)),
+                    Ok(frame) => (
+                        Some(uuid),
+                        comparison_column(&study, &frame, format, state.day_zone()),
+                    ),
+                    Err(_) => (Some(uuid), uncomputable_column(&study, state.day_zone())),
                 },
                 Ok(None) => return (None, missing_column(gone_base(&pick.label))),
                 Err(_) => return (None, unavailable_column(&pick.label)),
@@ -324,8 +327,8 @@ pub(crate) fn push_comparison(
     let cols: Vec<&steadyinvest_report::ComparisonColumn> = keyed.iter().map(|(_, x)| x).collect();
     // The notice slot holds only the export outcome of THIS table: a new table clears it.
     c.set_notice(SharedString::new());
-    let today: String = state.now().0.chars().take(10).collect();
-    c.set_date(today.into());
+    // Today in the owner's zone (owner decision, Guy 2026-10-03).
+    c.set_date(state.today_shown().into());
     let currencies: std::collections::BTreeSet<&str> = cols
         .iter()
         .filter(|x| !x.unavailable)
@@ -618,7 +621,12 @@ mod tests {
         let keep = short.years.len() - 3;
         short.years.drain(..keep);
         let column = |study: &steadyinvest_contract::Study| {
-            comparison_column(study, &build_frame(study).unwrap(), NumberFormat::Comma)
+            comparison_column(
+                study,
+                &build_frame(study).unwrap(),
+                NumberFormat::Comma,
+                steadyinvest_report::price_age::DayZone::UTC,
+            )
         };
         let (a, b) = (column(&full), column(&short));
         assert_eq!((a.ptp_avg_years, b.ptp_avg_years), (5, 3));

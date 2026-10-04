@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 use crate::StudyRow;
 use crate::state::created_at_date;
+use steadyinvest_report::price_age::DayZone;
 
 /// One study's per-refresh derived list facts. Computed app-side via `build_snapshot` (Cardinal Rule:
 /// `curate` stays pure and only READS this map):
@@ -30,10 +31,10 @@ pub struct StudyReturn {
     pub incomplete: bool,
     pub zone: &'static str,
     /// Guy's on-screen test (2026-09-30) — the upside/downside ratio, built by [`ud_facts`]. The
-    /// list deliberately DIFFERS from the study screen in two places (Guy, 2026-10-01/03): a
+    /// list deliberately DIFFERS from the study screen in one place (Guy, 2026-10-01/03): a
     /// withheld verdict lists « — » (the study screen still shows the engine's ratio over the open
-    /// inputs), and an undefined ratio (price ≤ forecast low) lists « ∞ » (the study screen shows
-    /// « — »). An unknown ratio is « — » on both.
+    /// inputs). An undefined ratio (price ≤ forecast low) is « ∞ » and an unknown one « — » on
+    /// both (owner decision, 2026-10-03).
     pub ud: String,
     /// Guy, 2026-10-01/03 (« Tri : U/D »): the sort value behind `ud` — `None` exactly when `ud`
     /// reads « — » (withheld verdict or unknown ratio), which sorts LAST in both directions.
@@ -87,12 +88,6 @@ pub fn unless_withheld<T>(
     if incomplete { no_value() } else { stated() }
 }
 
-/// The list's U/D cell for an undefined ratio (Guy, 2026-10-03, decision A): the current price is
-/// at or below the forecast low — no downside left while the upside is positive (`Undefined`
-/// implies `forecast_high > forecast_low`, else the core says `Unknown`), so the ratio is
-/// unbounded. A symbol, not prose (like `EMPTY_SLOT`).
-pub const UD_UNBOUNDED: &str = "∞";
-
 /// The U/D sort value (Guy, 2026-10-03): a stated ratio, or the unbounded one, which ranks above
 /// every ratio (variant order: `Ratio < Unbounded`, ratios by exact decimal) — first in descending
 /// order, last in ascending.
@@ -103,21 +98,21 @@ pub enum UdRank {
 }
 
 /// The list's U/D facts: the displayed ratio and its sort value. Withheld verdict → « — », no
-/// value ([`unless_withheld`]); `Ratio` → « 3,4:1 » (`engine::fmt_ud`); `Undefined` → « ∞ »,
-/// ranked as +∞ (decision A — the MOST favourable case, not an absence); `Unknown` → « — », no
-/// value.
+/// value ([`unless_withheld`]); otherwise THE screens' formatter (`engine::fmt_ud`): `Ratio` →
+/// « 3,4:1 »; `Undefined` → « ∞ » (`steadyinvest_report::UD_UNBOUNDED`), ranked as +∞ (decision
+/// A — the MOST favourable case, not an absence); `Unknown` → « — », no value.
 pub fn ud_facts(
     ud: &UpsideDownside,
     incomplete: bool,
     format: crate::viewmodel::format::NumberFormat,
 ) -> (String, Option<UdRank>) {
-    unless_withheld(incomplete, || match ud {
-        UpsideDownside::Ratio(d) => (
-            crate::viewmodel::engine::fmt_ud(ud, format),
-            Some(UdRank::Ratio(*d)),
-        ),
-        UpsideDownside::Undefined => (UD_UNBOUNDED.to_string(), Some(UdRank::Unbounded)),
-        UpsideDownside::Unknown => no_value(),
+    unless_withheld(incomplete, || {
+        let rank = match ud {
+            UpsideDownside::Ratio(d) => UdRank::Ratio(*d),
+            UpsideDownside::Undefined => UdRank::Unbounded,
+            UpsideDownside::Unknown => return no_value(),
+        };
+        (crate::viewmodel::engine::fmt_ud(ud, format), Some(rank))
     })
 }
 
@@ -242,12 +237,13 @@ pub fn potential_facts(
 /// Map one summary row into the Slint `StudyRow` (id stringified, date trimmed to the day, status
 /// verbatim, the pre-formatted potential-return string — "—" when the study withholds it — the
 /// issue #148 `incomplete` flag driving the "à compléter" marker, the present-price zone key, the
-/// company name shown after the ticker, and the issue #294 U/D emoticon with its greyed flag).
-pub fn to_row(summary: &StudySummary, facts: &StudyReturn) -> StudyRow {
+/// company name shown after the ticker, and the issue #294 U/D emoticon with its greyed flag; the
+/// created date is the local day of `day_zone`).
+pub fn to_row(summary: &StudySummary, facts: &StudyReturn, day_zone: DayZone) -> StudyRow {
     StudyRow {
         id: summary.id.to_string().into(),
         ticker: summary.security_ticker.clone().into(),
-        created_at: created_at_date(&summary.created_at).into(),
+        created_at: created_at_date(&summary.created_at, day_zone).into(),
         status: summary.status.clone().into(),
         potential_return: facts.display.as_str().into(),
         ud_ratio: facts.ud.as_str().into(),
@@ -332,6 +328,7 @@ pub fn curate(
     descending: bool,
     status_filter: StatusFilter,
     returns: &HashMap<Uuid, StudyReturn>,
+    zone: DayZone,
 ) -> Vec<StudyRow> {
     use std::cmp::Ordering;
     let needle = query.trim().to_lowercase();
@@ -383,7 +380,7 @@ pub fn curate(
     kept.iter()
         .map(|s| {
             let facts = returns.get(&s.id).unwrap_or(&empty);
-            to_row(s, facts)
+            to_row(s, facts, zone)
         })
         .collect()
 }
@@ -444,6 +441,7 @@ mod tests {
             false,
             StatusFilter::Active,
             &no_returns(),
+            DayZone::UTC,
         );
         assert_eq!(
             tickers(&rows),
@@ -461,6 +459,7 @@ mod tests {
             false,
             StatusFilter::Archived,
             &no_returns(),
+            DayZone::UTC,
         );
         assert_eq!(tickers(&archived), vec!["ABBN"]);
         let all = curate(
@@ -470,6 +469,7 @@ mod tests {
             false,
             StatusFilter::All,
             &no_returns(),
+            DayZone::UTC,
         );
         assert_eq!(all.len(), 3, "all shows active + archived");
     }
@@ -483,6 +483,7 @@ mod tests {
             false,
             StatusFilter::All,
             &no_returns(),
+            DayZone::UTC,
         );
         assert_eq!(
             tickers(&rows),
@@ -496,6 +497,7 @@ mod tests {
             false,
             StatusFilter::All,
             &no_returns(),
+            DayZone::UTC,
         );
         assert!(none.is_empty(), "no match → empty");
     }
@@ -509,6 +511,7 @@ mod tests {
             false,
             StatusFilter::All,
             &no_returns(),
+            DayZone::UTC,
         );
         assert_eq!(
             tickers(&by_date),
@@ -522,6 +525,7 @@ mod tests {
             true,
             StatusFilter::All,
             &no_returns(),
+            DayZone::UTC,
         );
         assert_eq!(
             tickers(&by_date_desc),
@@ -535,6 +539,7 @@ mod tests {
             false,
             StatusFilter::All,
             &no_returns(),
+            DayZone::UTC,
         );
         assert_eq!(
             tickers(&by_ticker),
@@ -557,6 +562,7 @@ mod tests {
             false,
             StatusFilter::All,
             &no_returns(),
+            DayZone::UTC,
         );
         let ids: Vec<String> = rows.iter().map(|r| r.id.to_string()).collect();
         assert_eq!(
@@ -587,6 +593,7 @@ mod tests {
             true,
             StatusFilter::All,
             &returns,
+            DayZone::UTC,
         );
         assert_eq!(tickers(&desc), vec!["NESN", "ROG", "ABBN"]);
         // The formatted potential rides along on the row.
@@ -605,6 +612,7 @@ mod tests {
             false,
             StatusFilter::All,
             &returns,
+            DayZone::UTC,
         );
         assert_eq!(tickers(&asc), vec!["ROG", "NESN", "ABBN"]);
     }
@@ -621,7 +629,7 @@ mod tests {
     /// An undefined U/D ratio (price ≤ forecast low): « ∞ », ranked +∞ (decision A).
     fn ud_unbounded() -> StudyReturn {
         StudyReturn {
-            ud: UD_UNBOUNDED.to_string(),
+            ud: steadyinvest_report::UD_UNBOUNDED.to_string(),
             ud_value: Some(UdRank::Unbounded),
             ..StudyReturn::default()
         }
@@ -727,6 +735,7 @@ mod tests {
             true,
             StatusFilter::All,
             &returns,
+            DayZone::UTC,
         );
         assert_eq!(
             tickers(&desc),
@@ -743,6 +752,7 @@ mod tests {
             false,
             StatusFilter::All,
             &returns,
+            DayZone::UTC,
         );
         assert_eq!(
             tickers(&asc),
@@ -794,6 +804,7 @@ mod tests {
                 descending,
                 StatusFilter::All,
                 &returns,
+                DayZone::UTC,
             )
         };
         let desc = sorted(true);
@@ -836,6 +847,7 @@ mod tests {
             true,
             StatusFilter::All,
             &returns,
+            DayZone::UTC,
         );
         assert_eq!(
             tickers(&desc),
@@ -853,6 +865,7 @@ mod tests {
             false,
             StatusFilter::All,
             &returns,
+            DayZone::UTC,
         );
         assert_eq!(
             tickers(&asc),
@@ -883,6 +896,7 @@ mod tests {
             false,
             StatusFilter::All,
             &returns,
+            DayZone::UTC,
         );
         assert_eq!(tickers(&asc), vec!["AAA", "BBB", "CCC", "DDD"]);
         let desc = curate(
@@ -892,6 +906,7 @@ mod tests {
             true,
             StatusFilter::All,
             &returns,
+            DayZone::UTC,
         );
         assert_eq!(tickers(&desc), vec!["BBB", "AAA", "DDD", "CCC"]);
     }
@@ -927,6 +942,7 @@ mod tests {
             false,
             StatusFilter::All,
             &returns,
+            DayZone::UTC,
         );
         assert_eq!(tickers(&rows), vec!["NESN", "ROG"]);
         assert!(rows[0].incomplete, "NESN is flagged à compléter");
@@ -1046,6 +1062,7 @@ mod tests {
                     provisional,
                     ..StudyReturn::default()
                 },
+                DayZone::UTC,
             )
         };
         let r = row(Some(UdMood::High), false);

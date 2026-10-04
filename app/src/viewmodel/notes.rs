@@ -4,6 +4,7 @@
 //! words and cross as data; the only app strings are the meta line's date wording (UX §3.3).
 
 use steadyinvest_contract::{Study, Timestamp};
+use steadyinvest_report::price_age::DayZone;
 use uuid::Uuid;
 
 /// « · modifiée le » — the meta suffix of an edited note (UX 8.0 §3.3 « Notes »).
@@ -24,20 +25,15 @@ pub struct NoteRowView {
 
 /// `JJ/MM/AAAA` of an RFC3339 UTC stamp in the machine's LOCAL time zone (a note written at
 /// 00:30 in Zurich reads that day, not the day before); the raw stamp when malformed — display
-/// only, never a hard error. The history's day headers stay UTC (app-wide, unchanged).
+/// only, never a hard error. THE shared reading of a stamp's day (`price_age::DayZone::shown`) —
+/// the history's day headers are local too since the owner decision of 2026-10-03.
 pub fn date_fr(stamp: &Timestamp) -> String {
-    date_fr_in(stamp, &chrono::Local)
+    date_fr_in(stamp, DayZone::Local)
 }
 
 /// [`date_fr`] in a given zone — the pure core, tested with fixed offsets.
-fn date_fr_in<Tz: chrono::TimeZone>(stamp: &Timestamp, zone: &Tz) -> String
-where
-    Tz::Offset: std::fmt::Display,
-{
-    match chrono::DateTime::parse_from_rfc3339(&stamp.0) {
-        Ok(at) => at.with_timezone(zone).format("%d/%m/%Y").to_string(),
-        Err(_) => stamp.0.clone(),
-    }
+fn date_fr_in(stamp: &Timestamp, zone: DayZone) -> String {
+    zone.shown(stamp, steadyinvest_report::price_age::Day::jj_mm_aaaa)
 }
 
 /// The card's rows, newest first (by `created_at`, then id — a stable order for equal stamps);
@@ -121,14 +117,14 @@ mod tests {
     #[test]
     fn a_note_date_is_the_local_calendar_day() {
         let late = Timestamp("2026-09-26T22:30:00Z".to_string());
-        let zurich = chrono::FixedOffset::east_opt(2 * 3600).unwrap();
-        let new_york = chrono::FixedOffset::west_opt(4 * 3600).unwrap();
+        let zurich = DayZone::FixedSecondsEast(2 * 3600);
+        let new_york = DayZone::FixedSecondsEast(-4 * 3600);
         assert_eq!(
-            date_fr_in(&late, &zurich),
+            date_fr_in(&late, zurich),
             "27/09/2026",
             "00:30 in Zurich is the 27th"
         );
-        assert_eq!(date_fr_in(&late, &new_york), "26/09/2026");
+        assert_eq!(date_fr_in(&late, new_york), "26/09/2026");
     }
 
     #[test]

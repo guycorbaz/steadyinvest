@@ -162,6 +162,7 @@ fn label_choices(facts: &[ChoiceFacts]) -> Vec<StudyChoice> {
 fn choice_facts(
     summaries: &[StudySummary],
     currency_of: impl Fn(Uuid) -> Result<Option<String>, String>,
+    zone: steadyinvest_report::price_age::DayZone,
 ) -> Vec<ChoiceFacts> {
     let mut facts: Vec<ChoiceFacts> = Vec::with_capacity(summaries.len());
     for s in summaries {
@@ -184,7 +185,8 @@ fn choice_facts(
             id: s.id,
             ticker,
             currency,
-            date: s.created_at.0.chars().take(10).collect(),
+            // Its day in the owner's zone (owner decision, Guy 2026-10-03), as the study list.
+            date: crate::state::created_at_date(&s.created_at, zone),
         });
     }
     facts
@@ -196,11 +198,15 @@ fn choice_facts(
 /// study does not hide the others: it stays listed (see [`choice_facts`]).
 pub(crate) fn study_choices(state: &JournalState) -> Result<Vec<StudyChoice>, String> {
     let summaries = state.try_list_studies()?;
-    let facts = choice_facts(&summaries, |id| {
-        state
-            .try_get_study(id)
-            .map(|s| s.map(|study| study.native_currency))
-    });
+    let facts = choice_facts(
+        &summaries,
+        |id| {
+            state
+                .try_get_study(id)
+                .map(|s| s.map(|study| study.native_currency))
+        },
+        state.day_zone(),
+    );
     Ok(label_choices(&facts))
 }
 
@@ -271,7 +277,8 @@ pub(crate) fn refresh_studies(ui: &MainWindow, state: &JournalState) {
         // Guy's on-screen test (2026-09-30): the U/D ratio off the SAME snapshot. The list
         // deliberately differs from the study screen here (Guy, 2026-10-01/03): « — » and no sort
         // value for a withheld verdict (the study screen still shows the ratio over the open
-        // inputs), « ∞ » ranked as +∞ for an undefined ratio (the study screen shows « — »).
+        // inputs), « ∞ » ranked as +∞ for an undefined ratio (« ∞ » on every screen since the
+        // owner decision of 2026-10-03).
         let (ud, ud_value) = match &snapshot {
             Some(snap) => viewmodel::studies::ud_facts(
                 &snap.outputs().risk_reward.upside_downside,
@@ -323,6 +330,7 @@ pub(crate) fn refresh_studies(ui: &MainWindow, state: &JournalState) {
         studies.get_sort_descending(),
         viewmodel::studies::StatusFilter::from_wire(studies.get_status_filter().as_str()),
         &returns,
+        state.day_zone(),
     );
     studies.set_study_count(summaries.len() as i32);
     studies.set_rows(ModelRc::new(VecModel::from(rows)));
@@ -1177,12 +1185,16 @@ mod tests {
             summary(3, "NESN.SW", "2026-03-01"),
             summary(4, "ROG.SW", "2026-04-01"),
         ];
-        let listed = choice_facts(&summaries, |id| match id.as_u128() {
-            1 => Ok(Some("chf".into())),
-            2 => Err("unreadable".into()),
-            3 => Ok(None), // deleted between the listing and the read
-            _ => panic!("an unambiguous ticker is never read"),
-        });
+        let listed = choice_facts(
+            &summaries,
+            |id| match id.as_u128() {
+                1 => Ok(Some("chf".into())),
+                2 => Err("unreadable".into()),
+                3 => Ok(None), // deleted between the listing and the read
+                _ => panic!("an unambiguous ticker is never read"),
+            },
+            steadyinvest_report::price_age::DayZone::UTC,
+        );
         let c = label_choices(&listed);
         assert_eq!(
             c.len(),

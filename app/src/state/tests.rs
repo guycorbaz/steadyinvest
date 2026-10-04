@@ -9,6 +9,7 @@ use crate::clock::{FixedClock, FixedIdGen};
 use crate::viewmodel::{engine, entry};
 use rust_decimal::Decimal;
 use steadyinvest_contract::{Coverage, Freshness, Money, Review, Source, Study};
+use steadyinvest_core::ssg::UpsideDownside;
 use steadyinvest_ingestion::FetchedFinancials;
 use steadyinvest_persistence::{ImportSummary, ReadOnlyCause};
 use tempfile::TempDir;
@@ -5454,12 +5455,26 @@ fn missing_configured_file_falls_through_to_a_created_default_or_none() {
 }
 
 #[test]
-fn created_at_date_takes_the_date_portion() {
+fn created_at_date_takes_the_day_in_the_owners_zone() {
+    use steadyinvest_report::price_age::DayZone;
     assert_eq!(
-        created_at_date(&Timestamp("2026-06-13T09:00:00Z".to_string())),
+        created_at_date(&Timestamp("2026-06-13T09:00:00Z".to_string()), DayZone::UTC),
         "2026-06-13"
     );
-    assert_eq!(created_at_date(&Timestamp("weird".to_string())), "weird");
+    assert_eq!(
+        created_at_date(&Timestamp("weird".to_string()), DayZone::UTC),
+        "weird"
+    );
+    // Owner decision (Guy, 2026-10-03): the local day — fixed offsets, never the machine's zone.
+    let late = Timestamp("2026-06-13T23:30:00Z".to_string());
+    assert_eq!(
+        created_at_date(&late, DayZone::FixedSecondsEast(2 * 3600)),
+        "2026-06-14"
+    );
+    assert_eq!(
+        created_at_date(&late, DayZone::FixedSecondsEast(-4 * 3600)),
+        "2026-06-13"
+    );
 }
 
 // ── Story 2.4: manual entry → `Cell::edited` → `put_study` → reopen round-trip ──
@@ -6919,14 +6934,15 @@ fn candidate_distance_and_ud_are_exact_and_absent_when_undefined() {
     let near_c = candidates.iter().find(|c| c.ticker == "NEAR").unwrap();
     assert_eq!(near_c.distance_above_buy_pct, Some(expected));
     assert_eq!(
-        near_c.ud_ratio,
-        Some(Decimal::from_str_exact("1.5").unwrap()),
+        near_c.ud,
+        UpsideDownside::Ratio(Decimal::from_str_exact("1.5").unwrap()),
         "(160 − 100) / (100 − 60)"
     );
     let below_c = candidates.iter().find(|c| c.ticker == "BELOW").unwrap();
     assert_eq!(
-        below_c.ud_ratio, None,
-        "Undefined is an absence, never a number"
+        below_c.ud,
+        UpsideDownside::Undefined,
+        "below the forecast low: the unbounded ratio (« ∞ » on screen), never a number"
     );
     assert_eq!(below_c.distance_above_buy_pct, None, "below the band");
     assert_eq!(

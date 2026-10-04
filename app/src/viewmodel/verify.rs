@@ -548,7 +548,12 @@ mod tests {
                     engine::risk_computed(outputs, &study.judgment, format),
                     engine::return_computed(outputs, format),
                     engine::zone_bar(study, snapshot, format),
-                    engine::verdict_badge(study, snapshot, format),
+                    engine::verdict_badge(
+                        study,
+                        snapshot,
+                        format,
+                        steadyinvest_report::price_age::DayZone::UTC
+                    ),
                 ));
                 out.push_str(&format!(
                     "{} {} {} {} {} {} {} {}\n{} {} {} {} {} {}\n",

@@ -162,8 +162,9 @@ fn examine(
     quick_screen(years, present_price, present_eps)
 }
 
+/// Today in the owner's zone (owner decision, Guy 2026-10-03).
 fn today(state: &JournalState) -> String {
-    state.now().0.chars().take(10).collect()
+    state.today_shown()
 }
 
 /// The examination of fetched financials. Issue #109's rule, as the study apply path: a year

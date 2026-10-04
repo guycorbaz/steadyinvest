@@ -137,8 +137,9 @@ pub struct ReplacementCandidate {
     /// `(price − buy_top) / buy_top × 100` when the price sits ABOVE the buy zone — the
     /// relative distance candidates are ranked by. Absent inside the zone or without a band.
     pub distance_above_buy_pct: Option<Decimal>,
-    /// The §4 U/D ratio when it IS a ratio — `Undefined`/`Unknown` are absences, never 0.
-    pub ud_ratio: Option<Decimal>,
+    /// The §4 U/D as the engine states it — formatted by THE screens' `engine::fmt_ud` (« ∞ »
+    /// when undefined, owner decision 2026-10-03); `Unknown` (and no study) is an absence, never 0.
+    pub ud: UpsideDownside,
     /// The study's native currency (uppercased); `None` without a study.
     pub currency: Option<String>,
     /// The candidate's ALREADY-HELD share of the total invested capital (Story 6.7 rows) —
@@ -394,7 +395,7 @@ impl JournalState {
                 sector_share_pct: None,
                 sector_missing_pair: None,
                 distance_above_buy_pct: None,
-                ud_ratio: None,
+                ud: UpsideDownside::Unknown,
                 currency: None,
                 held_share_pct: None,
                 currency_share_pct: None,
@@ -422,13 +423,9 @@ impl JournalState {
                                         })
                                         .flatten()
                                 });
-                            let ud = match rr.upside_downside {
-                                UpsideDownside::Ratio(ratio) => Some(ratio),
-                                UpsideDownside::Undefined | UpsideDownside::Unknown => None,
-                            };
-                            (rr.present_price_zone, distance, ud)
+                            (rr.present_price_zone, distance, rr.upside_downside)
                         }
-                        None => (None, None, None),
+                        None => (None, None, UpsideDownside::Unknown),
                     };
                     let in_buy_zone = zone == Some(steadyinvest_core::ssg::Zone::Buy);
                     // Issue #48 (FR35): a price BELOW the recorded band is a statable neutral
@@ -478,7 +475,7 @@ impl JournalState {
                         in_buy_zone,
                         below_band,
                         distance_above_buy_pct: distance,
-                        ud_ratio: ud,
+                        ud,
                         currency: Some(currency),
                         sector,
                         sector_share_pct,

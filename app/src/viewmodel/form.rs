@@ -140,11 +140,12 @@ fn editable_cell(
 
 /// The non-collapsible header identity block: ticker · native currency · created-at (date) · the
 /// method-identity string. All already-display-ready strings; no money, no computation.
-pub fn header(study: &Study) -> FormHeader {
+pub fn header(study: &Study, zone: steadyinvest_report::price_age::DayZone) -> FormHeader {
     FormHeader {
         ticker: study.security_ticker.clone().into(),
         currency: study.native_currency.clone().into(),
-        created_at: created_at_date(&study.created_at).into(),
+        // Its day in the owner's zone (owner decision, Guy 2026-10-03), as the study list.
+        created_at: crate::state::created_at_date(&study.created_at, zone).into(),
         // `core::METHOD_VERSION` is a `&'static str` identity constant, NOT a verdict — display.
         method_version: steadyinvest_core::METHOD_VERSION.into(),
         // 2026-07-12: the header card's company name ("" when unset → the field shows its placeholder).
@@ -247,13 +248,6 @@ pub fn year_headers(study: &Study) -> Vec<slint::SharedString> {
         .collect()
 }
 
-/// A neutral RFC3339 timestamp rendered for the header: the date portion only. A non-RFC3339 string
-/// passes through unchanged — a display transform, it never repairs a value. (Mirrors
-/// `state::created_at_date`; duplicated to keep the adapter self-contained.)
-fn created_at_date(ts: &Timestamp) -> String {
-    ts.0.split('T').next().unwrap_or(&ts.0).to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -351,7 +345,7 @@ mod tests {
 
     #[test]
     fn header_carries_identity_and_a_method_version_never_empty() {
-        let h = header(&study(vec![]));
+        let h = header(&study(vec![]), steadyinvest_report::price_age::DayZone::UTC);
         assert_eq!(h.ticker, "NESN");
         assert_eq!(h.currency, "CHF");
         assert_eq!(h.created_at, "2026-06-13", "created-at trimmed to the day");

@@ -30,3 +30,13 @@ pub use pdf::{
 pub use quick_screen::{QuickScreen, QuickScreenLadder, QuickScreenPriceRow, render_quick_screen};
 pub use review::{DueLine, PortfolioReview, ReviewLine, ShareLine, render_portfolio_review};
 pub use zones::ZoneNouns;
+
+/// THE display of an undefined U/D ratio (owner decision, Guy 2026-10-03): the current price is at
+/// or below the forecast low — no downside left while the upside is positive
+/// (`UpsideDownside::Undefined` implies `forecast_high > forecast_low`, else the core says
+/// `Unknown`), so the ratio is unbounded: the MOST favourable case, not an absence. Every screen
+/// (study, scenarios, comparison, review, frozen verdict, study list, replacement candidates)
+/// prints this one symbol; `Unknown` keeps the em-dash. A symbol, not prose (like the em-dash).
+/// The PDFs cannot print it — their standard-14 Helvetica is WinAnsi-encoded, which has no « ∞ »
+/// (U+221E) — so they print [`pdf::UD_UNBOUNDED_PDF`] in its place.
+pub const UD_UNBOUNDED: &str = "∞";

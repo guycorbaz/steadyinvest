@@ -90,6 +90,8 @@ editHistory:
   - date: '2026-10-03'
     changes: "PR #293 brought up to date with main (PR #289, PR #291), then decisions C and D carried to the shown dates: Appendix A — an origin whose date cannot be read counts as an unknown date (« date inconnue », stale, its source named), and the date shown for a price origin in the traceability and the study PDF is the local day the age counts from (« séance du … » stays the provider's date). Tagged « réconcilié 2026-10-03 »."
   - date: '2026-10-03'
+    changes: "Owner decisions (Guy 2026-10-03): Appendix A — an undefined U/D ratio (price ≤ forecast low) reads « ∞ » on every screen (« illimité » in the PDFs, whose font has no such glyph), « — » staying for an unknown one; every shown date or time of a recorded instant is local (traceability, frozen verdict, history, lists, comparison, review, quick screen, holdings), typed calendar dates and session dates shown as given. Tagged « réconcilié 2026-10-03 »."
+  - date: '2026-10-03'
     changes: "FR54 extended — owner decision (Guy, 2026-10-03, issue #294): the study list shows a U/D emoticon beside the ticker (🙂 at or above the high threshold or an undefined ratio, 😐 between, 🙁 below the low threshold; none where the U/D column reads « — »; greyed when the verdict is provisional), thresholds set in Réglages (defaults 3 and 1/3, a decimal in the number format or a whole fraction), screen only. Tagged « ajouté 2026-10-03 (issue #294) »."
 ---
 
@@ -931,7 +933,8 @@ withholding-refund tracking, export/share, eventual public release.
   verdict is provisional (e.g. a stale or undated current price). The two thresholds are set in
   Réglages — defaults **3** and **1/3**, each a decimal in the user's number format or a fraction of
   two whole numbers; the low threshold must stay below the high one, else the change is refused by
-  name. Screen only: never printed in a PDF (ajouté 2026-10-03 (issue #294) — owner decision, Guy).
+  name. The defaults are the NAIC « U/D ≥ 3 » criterion and its mirror, not the zone boundaries (the
+  zones are thirds, edges at U/D 2 and 1/2; setting 2 and 1/2 aligns the emoticon with them). Screen only: never printed in a PDF (ajouté 2026-10-03 (issue #294) — owner decision, Guy).
 - FR55 **[P1]:** The user can **delete or archive** a study (with confirmation); deletions never corrupt
   the journal time-series. **[P4]:** deleting a study also deletes its AI drafts, as it does its
   judgment history.
@@ -1160,6 +1163,19 @@ withholding-refund tracking, export/share, eventual public release.
 - **Scalability:** single-user, local, no growth/traffic concerns — intentionally out of scope.
 
 ## Appendix A — Definitions (pinned values referenced by FRs)
+
+- **Undefined upside/downside ratio (FR4, FR52–FR54; réconcilié 2026-10-03 : décision Guy):** a current price at or below the forecast low leaves no downside while the upside is positive (`UpsideDownside::Undefined`)
+  — the ratio is unbounded, the most favourable case, not an absence: every screen shows « ∞ »
+  (study, scenarios, comparison, review, frozen verdict, study list — sorted above every ratio —,
+  replacement candidates); the PDFs print « illimité » (their font has no « ∞ » glyph); an unknown
+  ratio stays « — ». The U/D criterion (≥ 3) is unchanged by this display. The MCP keeps its code
+  (`upside_downside: null`, `ud_state: "undefined"`).
+- **Shown dates (réconcilié 2026-10-03 : décision Guy):** dates are stored in UTC and every date or
+  time shown of a recorded instant is the owner's **local** one, read in the same zone as the
+  price's age (FR23) — the traceability (« dernière mise à jour le … »), the frozen verdict
+  (« Verdict figé le … », screen and study PDF), the history, the study list, the comparison, the
+  review, the quick screen, the holdings. Dates the owner types (transactions, dividends, FX rates)
+  and a provider's session date are shown as given.
 
 - **Capital-at-risk (single portfolio, FR43):** Σ over holdings of `max(0, (avg_cost − stop)) ×
   qty`, counted only where `stop ≤ avg_cost`; per currency natively, converted at current FX for the

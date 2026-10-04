@@ -281,11 +281,18 @@ pub(crate) fn refresh_holdings(
             id: h.id.to_string().into(),
             ticker: h.security_ticker.clone().into(),
             currency: crate::state::effective_currency(h, &reference_currency).into(),
-            // The sold DAY (the stamp is RFC3339); a malformed stamp falls back to the full string.
+            // The sold DAY (the stamp is the RFC3339 instant the position emptied), in the owner's
+            // zone (owner decision, Guy 2026-10-03); a malformed stamp falls back to the full
+            // string. The ledger's own dates are calendar dates as typed — never re-zoned.
             sold_date: h
                 .sold_at
-                .as_deref()
-                .map(|s| s.get(..10).unwrap_or(s))
+                .as_ref()
+                .map(|s| {
+                    crate::state::created_at_date(
+                        &steadyinvest_contract::Timestamp(s.clone()),
+                        state.day_zone(),
+                    )
+                })
                 .unwrap_or_default()
                 .into(),
         })
