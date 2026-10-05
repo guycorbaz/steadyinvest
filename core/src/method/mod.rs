@@ -40,6 +40,12 @@ pub const LOAD_BEARING_JUDGMENT_INPUTS: [&str; 5] = [
 pub fn ud_target() -> Decimal {
     Decimal::new(30, 1)
 }
+/// Whether an UNDEFINED U/D ratio (spec §9: current price ≤ forecast low — no downside left, the
+/// upside unbounded) meets the « U/D ≥ 3 » verdict criterion. `true` since `ssg-1.3.0` (owner
+/// decision, Guy 2026-10-03: ∞ ≥ 3 — a price at or below the forecast low is deep in the buy
+/// range); under `ssg-1.2.0` and before, the criterion was withheld (unmet by insufficiency). An
+/// UNKNOWN ratio (missing inputs) stays withheld. Fingerprinted: the verdict rule is the method.
+pub const UD_UNDEFINED_MEETS_TARGET: bool = true;
 /// Upside/downside ratio above which the high/low choices should be reconsidered (15.0).
 pub fn ud_extreme() -> Decimal {
     Decimal::new(150, 1)
@@ -210,6 +216,9 @@ pub fn method_fingerprint() -> String {
     p.push(format!("ud_target={}", d(ud_target())));
     p.push(format!("ud_extreme={}", d(ud_extreme())));
     p.push(format!(
+        "ud_undefined_meets_target={UD_UNDEFINED_MEETS_TARGET}"
+    ));
+    p.push(format!(
         "relative_value_ceiling_pct={}",
         d(relative_value_ceiling_pct())
     ));
@@ -256,7 +265,7 @@ mod tests {
     /// assertion prints the new value).
     #[test]
     fn method_fingerprint_is_pinned_to_version() {
-        const EXPECTED: &str = "037712d3521c9e04f3eba175937eef4a4dbff47fca0f87d6e9969f1b3ca0692d";
+        const EXPECTED: &str = "a49be9fdd03eea8ec761ed3725af3fb8193a32c53376daa4381c78e23a814fa7";
         assert_eq!(
             method_fingerprint(),
             EXPECTED,

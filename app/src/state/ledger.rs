@@ -88,12 +88,15 @@ impl OwnedEntry {
 }
 
 /// Normalize the user's transaction date (FR39's "date") to the stored RFC3339 spelling.
-/// `""` defaults to today (the injected clock's date); otherwise a plausible `YYYY-MM-DD` is
-/// required and stored as midnight UTC so it orders correctly against full timestamps.
-pub(super) fn normalize_event_date(input: &str, now_rfc3339: &str) -> Result<String, String> {
+/// `""` defaults to `today` — the owner's LOCAL day (`JournalState::today_shown`: the injected
+/// clock read in its `DayZone`; owner decision I, Guy 2026-10-03: a buy typed at 00:30 in Zurich
+/// is that day's, not the previous UTC day's); otherwise a plausible `YYYY-MM-DD` is required.
+/// Either way the calendar date is stored as midnight UTC (the storage convention, unchanged) so
+/// it orders correctly against full timestamps.
+pub(super) fn normalize_event_date(input: &str, today: &str) -> Result<String, String> {
     let trimmed = input.trim();
     let date = if trimmed.is_empty() {
-        now_rfc3339.get(..10).unwrap_or_default().to_string()
+        today.to_string()
     } else {
         trimmed.to_string()
     };
@@ -338,7 +341,13 @@ impl JournalState {
         if has_buy {
             return None;
         }
-        let day = holding.created_at.0.get(..10).unwrap_or("1900-01-01");
+        // The holding's creation DAY in the owner's zone (owner decision I, Guy 2026-10-03: a
+        // holding created at 00:30 in Zurich opens on that day, not the previous UTC day); an
+        // unreadable stamp keeps the 1900-01-01 floor.
+        let day = self.day_zone().day_of(&holding.created_at).map_or_else(
+            || "1900-01-01".to_string(),
+            steadyinvest_report::price_age::Day::iso,
+        );
         Some(OwnedEntry {
             id: self.idgen.new_id(),
             occurred_at: format!("{day}T00:00:00Z"),
@@ -381,7 +390,7 @@ impl JournalState {
             &POSITION_AMOUNTS,
         )?;
         let now = self.clock.now();
-        let occurred_at = normalize_event_date(date_input, &now.0)?;
+        let occurred_at = normalize_event_date(date_input, &self.today_shown())?;
         let rows = self.ledger_rows_strict(holding_id)?;
         let opening = self.opening_for(&holding, &rows, reference_currency);
         let rationale = rationale.trim();
@@ -484,7 +493,7 @@ impl JournalState {
         let now = self.clock.now();
         // Date-granular like every 6.3 event (midnight UTC) — a same-day buy/sell pair replays by
         // insertion order (`created_at`), not by which path stamped a wall-clock time.
-        let occurred_at = normalize_event_date("", &now.0)?;
+        let occurred_at = normalize_event_date("", &self.today_shown())?;
         let rows = self.ledger_rows_strict(holding_id)?;
         let opening = self.opening_for(&holding, &rows, reference_currency);
         let rationale = rationale.trim();
@@ -532,7 +541,7 @@ impl JournalState {
             &POSITION_AMOUNTS,
         )?;
         let now = self.clock.now();
-        let occurred_at = normalize_event_date(date_input, &now.0)?;
+        let occurred_at = normalize_event_date(date_input, &self.today_shown())?;
         let rows = self.ledger_rows_strict(holding_id)?;
         let opening = self.opening_for(&holding, &rows, reference_currency);
         let rationale = rationale.trim();
@@ -653,7 +662,7 @@ impl JournalState {
             return Err(MSG_DIVIDEND_WITHHOLDING.to_string());
         }
         let now = self.clock.now();
-        let occurred_at = normalize_event_date(date_input, &now.0)?;
+        let occurred_at = normalize_event_date(date_input, &self.today_shown())?;
         let rationale = rationale.trim();
         let entry = OwnedEntry {
             id: self.idgen.new_id(),
@@ -745,7 +754,7 @@ impl JournalState {
         self.refuse_if_read_only()?;
         let holding = self.any_holding(holding_id)?;
         let now = self.clock.now();
-        let normalized = normalize_event_date(date_input, &now.0)?;
+        let normalized = normalize_event_date(date_input, &self.today_shown())?;
         let rows = self.ledger_rows_strict(holding_id)?;
         let target = rows
             .iter()

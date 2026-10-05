@@ -76,6 +76,23 @@ impl Clock for FixedClock {
     }
 }
 
+/// Test double: a clock pinned to a fixed instant, its days read in a fixed zone (owner decision
+/// I — the local day — tested at fixed offsets, never the machine's zone).
+#[cfg(test)]
+#[derive(Debug, Clone)]
+pub struct ZonedClock(pub Timestamp, pub DayZone);
+
+#[cfg(test)]
+impl Clock for ZonedClock {
+    fn now(&self) -> Timestamp {
+        self.0.clone()
+    }
+
+    fn day_zone(&self) -> DayZone {
+        self.1
+    }
+}
+
 /// Test double: an id source returning a fixed UUID (deterministic ids).
 #[cfg(test)]
 #[derive(Debug, Clone, Copy)]

@@ -463,8 +463,8 @@ fn s9_ud_denominator_nonpositive_is_undefined_not_a_number() {
     );
     assert_eq!(
         out.verdict_facts.ud_at_or_above_target,
-        CriterionFact::UnmetByInsufficiency,
-        "the verdict withholds the U/D criterion"
+        CriterionFact::Met,
+        "ssg-1.3.0 (décision Guy H): an undefined U/D — no downside left — meets ≥ 3 (∞ ≥ 3)"
     );
     assert!(
         !out.quality_flags.contains(&QualityFlagKey::UdBelowTarget)
@@ -490,6 +490,47 @@ fn s9_ud_denominator_nonpositive_is_undefined_not_a_number() {
         out.risk_reward.present_price_zone, None,
         "a price below the range has no zone"
     );
+    assert_eq!(
+        out.verdict_facts.ud_at_or_above_target,
+        CriterionFact::Met,
+        "strictly below the forecast low: undefined, and the criterion is met all the same"
+    );
+}
+
+/// ssg-1.3.0 (décision Guy H, 2026-10-03) — a full verdict example: the tutorial study priced
+/// exactly AT its forecast low (12.6). The U/D is undefined (no downside left), its criterion is
+/// MET, the price sits at the bottom of the Buy zone, relative value is below 100 and the
+/// appreciation to the forecast high (44.79) is ≈ +255 %: every criterion is met, so the study
+/// is a quality-and-value candidate — under ssg-1.2.0 the withheld U/D criterion kept it from
+/// being one.
+#[test]
+fn undefined_ud_at_the_forecast_low_completes_a_candidate_verdict() {
+    let mut at_low = tutorial_judgment();
+    at_low.current_price = Some(d("12.6"));
+    let out = compute(&tutorial_financials(), &at_low, &tutorial_observations());
+    assert_eq!(out.risk_reward.upside_downside, UpsideDownside::Undefined);
+    let v = &out.verdict_facts;
+    assert_eq!(v.present_price_zone, Some(Zone::Buy));
+    assert_eq!(v.ud_at_or_above_target, CriterionFact::Met);
+    assert_eq!(v.relative_value_below_ceiling, CriterionFact::Met);
+    assert_eq!(v.present_price_in_buy_zone, CriterionFact::Met);
+    assert_eq!(v.appreciation_at_or_above_double, CriterionFact::Met);
+    assert!(v.quality_value_candidate, "all four criteria are Met");
+}
+
+/// An UNKNOWN U/D (missing input — here no current price) keeps the criterion withheld: the
+/// ssg-1.3.0 rule is about the undefined ratio only.
+#[test]
+fn unknown_ud_still_withholds_the_criterion() {
+    let mut judgment = tutorial_judgment();
+    judgment.current_price = None;
+    let out = compute(&tutorial_financials(), &judgment, &tutorial_observations());
+    assert_eq!(out.risk_reward.upside_downside, UpsideDownside::Unknown);
+    assert_eq!(
+        out.verdict_facts.ud_at_or_above_target,
+        CriterionFact::UnmetByInsufficiency
+    );
+    assert!(!out.verdict_facts.quality_value_candidate);
 }
 
 /// Row 2: CAGR base ≤ 0 or sign-crossing ⇒ unknown, never 0; `eps_lags_sales` is then never
@@ -714,6 +755,11 @@ fn degenerate_forecast_range_yields_no_zones_and_unknown_ud() {
     assert_eq!(
         out.verdict_facts.present_price_in_buy_zone,
         CriterionFact::UnmetByInsufficiency
+    );
+    assert_eq!(
+        out.verdict_facts.ud_at_or_above_target,
+        CriterionFact::UnmetByInsufficiency,
+        "a degenerate range is an unknown U/D: the criterion stays withheld"
     );
 }
 

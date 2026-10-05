@@ -665,14 +665,22 @@ decimal values stored as `TEXT` decimal strings** (NOT `REAL` — preserves `rus
   date, the comparison / quick-screen / review « today », a sold position's day and the holdings
   freshness caption; notes, drafts and AI lines already were local. Calendar dates typed by the
   owner (transactions, dividends, FX rates — stored at midnight UTC) and provider session dates
-  are dates, never re-zoned; backup file names keep their UTC stamp (`…T081500Z`).
+  are dates, never re-zoned; backup file names keep their UTC stamp (`…T081500Z`). « Today » as a
+  DEFAULT is local too: a blank transaction / dividend / FX-rate date
+  (`state::ledger::normalize_event_date`), the FX future-date bound, a holding's opening-row day and
+  the price-cache fallback day are `JournalState::today_shown()` / `DayZone::day_of` in the clock's
+  zone, never the UTC prefix of `now` (réconcilié 2026-10-03 : décision Guy I).
 - **U/D display (réconcilié 2026-10-03 : décision Guy):** an undefined ratio (current price ≤
   forecast low, `UpsideDownside::Undefined`) is unbounded — the most favourable case — and every
   screen shows « ∞ » from ONE constant (`report::UD_UNBOUNDED`) through ONE formatter
   (`engine::fmt_ud`: study, scenarios, comparison, review, frozen verdict, study list, replacement
   candidates); `Unknown` stays « — ». The PDFs print « illimité » (`report::pdf::UD_UNBOUNDED_PDF`):
   their standard-14 Helvetica is WinAnsi-encoded, which has no « ∞ » glyph. The MCP keeps its
-  machine code (`computed.upside_downside: null`, `ud_state: "undefined"`).
+  machine code (`computed.upside_downside: null`, `ud_state: "undefined"`). The verdict counts an
+  undefined ratio as MEETING « U/D ≥ 3 » (`core::ssg` `verdict_facts`, the fingerprinted
+  `core::method::UD_UNDEFINED_MEETS_TARGET`; method `ssg-1.3.0`); `Unknown` still withholds it.
+  Frozen verdicts keep their recorded `method_version` and facts — never recomputed; the strip
+  shows the method change as the cause (A13) (réconcilié 2026-10-03 : décision Guy H).
 - **Enums:** `#[serde(rename_all = "snake_case")]`, internally tagged where a discriminant is needed
   (cell `source`: `provider|manual|derived`; `review`: `none|to_review|validated`).
 - **Booleans** as JSON booleans; tri-state review is an enum, never `0/1/2`.
@@ -790,7 +798,7 @@ steadyinvest/
 │   │   ├── checklist.rs
 │   │   ├── risk/                  # capital-at-risk, stops, concentration, ledger, fx::convert (FR28, FR36-48)
 │   │   ├── rounding.rs            # named rounding mode + per-field display scale
-│   │   └── method_version.rs      # METHOD_VERSION (ssg-1.2.0)
+│   │   └── method_version.rs      # METHOD_VERSION (ssg-1.3.0)
 │   └── tests/                     # golden/ (g01–g11), golden_*, ssg_*, normalize_*, verdict_*, spike_c (no benches/)
 │
 ├── contract/                      # steadyinvest-contract — versioned serde data contract; deps: serde, serde_json, rust_decimal, uuid, sha2

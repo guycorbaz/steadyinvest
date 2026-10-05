@@ -4,10 +4,12 @@
 //! which EPS; see `docs/method/ssg-method-spec-v1.md` "Change control"). By the Foundational
 //! Invariant, a `method_version` change re-addresses (invalidates) every derived verdict.
 
-/// Semver-like identifier of the SSG method this build implements. `ssg-1.2.0`: the historical
-/// inputs are the company's fiscal years, their high/low the fiscal year's, their EPS the reported
-/// diluted one (spec §0) — engine formulas unchanged.
-pub const METHOD_VERSION: &str = "ssg-1.2.0";
+/// Semver-like identifier of the SSG method this build implements. `ssg-1.3.0`: an undefined U/D
+/// ratio (current price ≤ forecast low) MEETS the « U/D ≥ 3 » verdict criterion — it was withheld
+/// before (spec §9; owner decision, Guy 2026-10-03). `ssg-1.2.0`: the historical inputs are the
+/// company's fiscal years, their high/low the fiscal year's, their EPS the reported diluted one
+/// (spec §0).
+pub const METHOD_VERSION: &str = "ssg-1.3.0";
 
 /// The method version that last changed what a historical input IS (spec §0 — the period a figure
 /// covers, which EPS). A provider figure fetched under an EARLIER version may differ from what a

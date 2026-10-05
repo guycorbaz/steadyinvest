@@ -93,6 +93,8 @@ editHistory:
     changes: "Owner decisions (Guy 2026-10-03): Appendix A — an undefined U/D ratio (price ≤ forecast low) reads « ∞ » on every screen (« illimité » in the PDFs, whose font has no such glyph), « — » staying for an unknown one; every shown date or time of a recorded instant is local (traceability, frozen verdict, history, lists, comparison, review, quick screen, holdings), typed calendar dates and session dates shown as given. Tagged « réconcilié 2026-10-03 »."
   - date: '2026-10-03'
     changes: "FR54 extended — owner decision (Guy, 2026-10-03, issue #294): the study list shows a U/D emoticon beside the ticker (🙂 at or above the high threshold or an undefined ratio, 😐 between, 🙁 below the low threshold; none where the U/D column reads « — »; greyed when the verdict is provisional), thresholds set in Réglages (defaults 3 and 1/3, a decimal in the number format or a whole fraction), screen only. Tagged « ajouté 2026-10-03 (issue #294) »."
+  - date: '2026-10-03'
+    changes: "Owner decisions H and I (Guy 2026-10-03): Appendix A — an undefined U/D ratio MEETS the U/D ≥ 3 verdict criterion (∞ ≥ 3), an unknown one still withholds it; a method change, `ssg-1.3.0` (method spec §1, §9; frozen verdicts keep their method and show the difference, FR68). A blank transaction, dividend or FX-rate date defaults to the owner's local day, stored as that calendar date at midnight UTC. Tagged « réconcilié 2026-10-03 : décision Guy H » / « … I »."
 ---
 
 # Product Requirements Document - steadyinvest
@@ -1168,14 +1170,18 @@ withholding-refund tracking, export/share, eventual public release.
   — the ratio is unbounded, the most favourable case, not an absence: every screen shows « ∞ »
   (study, scenarios, comparison, review, frozen verdict, study list — sorted above every ratio —,
   replacement candidates); the PDFs print « illimité » (their font has no « ∞ » glyph); an unknown
-  ratio stays « — ». The U/D criterion (≥ 3) is unchanged by this display. The MCP keeps its code
-  (`upside_downside: null`, `ud_state: "undefined"`).
+  ratio stays « — ». The MCP keeps its code (`upside_downside: null`, `ud_state: "undefined"`).
+  The U/D criterion (≥ 3) is **met** by an undefined ratio (∞ ≥ 3), withheld only for an unknown one
+  — method `ssg-1.3.0`; a verdict frozen under an earlier method keeps its recorded criterion and
+  reads as differing from the live one, the method change named (FR68) (réconcilié 2026-10-03 : décision Guy H).
 - **Shown dates (réconcilié 2026-10-03 : décision Guy):** dates are stored in UTC and every date or
   time shown of a recorded instant is the owner's **local** one, read in the same zone as the
   price's age (FR23) — the traceability (« dernière mise à jour le … »), the frozen verdict
   (« Verdict figé le … », screen and study PDF), the history, the study list, the comparison, the
   review, the quick screen, the holdings. Dates the owner types (transactions, dividends, FX rates)
-  and a provider's session date are shown as given.
+  and a provider's session date are shown as given. A date left blank is the owner's **local**
+  today — a buy entered at 00:30 in Zurich is that day's, not the previous UTC day's — stored, like
+  a typed one, as that calendar date at midnight UTC (réconcilié 2026-10-03 : décision Guy I).
 
 - **Capital-at-risk (single portfolio, FR43):** Σ over holdings of `max(0, (avg_cost − stop)) ×
   qty`, counted only where `stop ≤ avg_cost`; per currency natively, converted at current FX for the

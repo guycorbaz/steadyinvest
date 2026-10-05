@@ -33,8 +33,9 @@ pub use types::{
 };
 
 use crate::method::{
-    USABLE_YEARS_FLOOR, high_pe_aggressive, high_pe_implausible, relative_value_ceiling_pct,
-    roe_low_pct, ud_extreme, ud_target, verdict_double_appreciation_pct,
+    UD_UNDEFINED_MEETS_TARGET, USABLE_YEARS_FLOOR, high_pe_aggressive, high_pe_implausible,
+    relative_value_ceiling_pct, roe_low_pct, ud_extreme, ud_target,
+    verdict_double_appreciation_pct,
 };
 use crate::normalize::{CanonicalFinancials, CanonicalYear, YearUsability};
 use rust_decimal::Decimal;
@@ -242,8 +243,12 @@ fn verdict_facts(
     let ud_at_or_above_target = match risk_reward.upside_downside {
         UpsideDownside::Ratio(ud) if ud >= ud_target() => CriterionFact::Met,
         UpsideDownside::Ratio(_) => CriterionFact::Unmet,
-        // Undefined and Unknown are both insufficiency: §9 withholds the U/D criterion.
-        UpsideDownside::Undefined | UpsideDownside::Unknown => CriterionFact::UnmetByInsufficiency,
+        // §9 (ssg-1.3.0, owner decision Guy 2026-10-03): no downside left, the upside unbounded —
+        // ∞ ≥ 3, the criterion is met.
+        UpsideDownside::Undefined if UD_UNDEFINED_MEETS_TARGET => CriterionFact::Met,
+        UpsideDownside::Undefined => CriterionFact::UnmetByInsufficiency,
+        // Missing inputs: the criterion stays withheld.
+        UpsideDownside::Unknown => CriterionFact::UnmetByInsufficiency,
     };
     let relative_value_below_ceiling = criterion(valuation.relative_value_pct, |rv| {
         rv < relative_value_ceiling_pct()

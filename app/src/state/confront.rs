@@ -172,7 +172,9 @@ impl JournalState {
     /// close is a no-op, so an intraday last-write-wins correction is a deliberate non-goal here.
     pub(crate) fn cache_close(&mut self, ticker: &str, price: Decimal, session_date: Option<&str>) {
         let now = self.now();
-        let clock_day: String = now.0.chars().take(10).collect(); // YYYY-MM-DD prefix
+        // The clock's day in the owner's zone (owner decision I, Guy 2026-10-03: « today » is the
+        // local day, as the price age and the decision date read it).
+        let clock_day = self.today_shown();
         // Accept the provider's session date only when it is a well-formed ISO day; otherwise fall
         // back to the clock day so a malformed provider string never becomes a nonsense cache key.
         let date: &str = session_date
