@@ -66,6 +66,15 @@ pub(crate) fn mirror_risk_settings(ui: &MainWindow, cfg: &crate::config::AppConf
     prefs.set_size_target_large_pct(shown.target_large.into());
     // FR23 (owner decision 2026-10-01): the price age horizon, a whole number of trading days.
     prefs.set_price_stale_after(cfg.price_stale_after_or_default().to_string().into());
+    // Issue #294: the study list's U/D emoticon thresholds — shown in the number format on
+    // `Prefs` (Réglages, the row's tooltip), canonical on `Studies` (what `refresh_studies`
+    // classifies with).
+    let (ud_high, ud_low) = cfg.ud_threshold_spellings_or_default();
+    prefs.set_ud_high_threshold(ud_threshold_shown(&ud_high, cfg.number_format).into());
+    prefs.set_ud_low_threshold(ud_threshold_shown(&ud_low, cfg.number_format).into());
+    let studies = ui.global::<crate::Studies>();
+    studies.set_ud_high_canonical(ud_high.into());
+    studies.set_ud_low_canonical(ud_low.into());
     let threshold = cfg.concentration_threshold_pct_or_default();
     let (small_max, medium_max) = cfg.size_bounds_or_default();
     let (target_small, target_medium, target_large) = cfg.size_targets_or_default();
@@ -133,6 +142,60 @@ pub(crate) fn setting_input(
         NumberReading::Ambiguous => Err(crate::state::ambiguous_number_message(format).to_string()),
         NumberReading::NotANumber => Err(invalid.to_string()),
     }
+}
+
+/// A U/D emoticon threshold as the user reads it (issue #294): a fraction « 1/3 » verbatim, a
+/// decimal in the user's number format (« 0,5 » under the comma format).
+pub(crate) fn ud_threshold_shown(canonical: &str, format: NumberFormat) -> String {
+    if canonical.contains('/') {
+        canonical.to_string()
+    } else {
+        format_amount(canonical, format)
+    }
+}
+
+/// A U/D emoticon threshold as typed (issue #294): blank → `Ok(None)` (the default); « n/d » —
+/// two whole numbers, spaces around the slash allowed — → the canonical « n/d »; otherwise a
+/// decimal read under the user's number format ([`setting_input`]: « 0,5 » under the comma
+/// format, an ambiguous spelling refused as such). Anything else, zero or a negative value is
+/// the field's named refusal `invalid`.
+pub(crate) fn ud_threshold_input(
+    value: &str,
+    format: NumberFormat,
+    invalid: &str,
+) -> Result<Option<String>, String> {
+    let Some((n, d)) = value.split_once('/') else {
+        return setting_input(value, format, config::is_valid_ud_threshold, invalid);
+    };
+    let whole = |part: &str| {
+        let part = part.trim();
+        (!part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| rust_decimal::Decimal::from_str_exact(part).ok())
+            .flatten()
+            .map(|d| d.normalize().to_string())
+    };
+    match (whole(n), whole(d)) {
+        (Some(n), Some(d)) => {
+            let canonical = format!("{n}/{d}");
+            if config::is_valid_ud_threshold(&canonical) {
+                Ok(Some(canonical))
+            } else {
+                Err(invalid.to_string())
+            }
+        }
+        _ => Err(invalid.to_string()),
+    }
+}
+
+/// Whether a U/D threshold pair, as committed (`None` = that field's default), is ordered on its
+/// EFFECTIVE values: `low < high` (issue #294).
+pub(crate) fn ud_pair_ordered(high: Option<&str>, low: Option<&str>) -> bool {
+    use crate::viewmodel::studies::{DEFAULT_UD_HIGH, DEFAULT_UD_LOW, UdThresholds};
+    UdThresholds::from_spellings(
+        high.unwrap_or(DEFAULT_UD_HIGH),
+        low.unwrap_or(DEFAULT_UD_LOW),
+    )
+    .is_some()
 }
 
 /// A diversify-by-size field as typed: [`setting_input`], every refusal naming the field (issue
@@ -477,6 +540,48 @@ pub(crate) fn wire_prefs(ui: &MainWindow, s: &Session) {
                 true
             });
     }
+    // ── Issue #294 (Guy, 2026-10-03) — the study list's U/D emoticon thresholds: high and low,
+    // committed as a pair ("" = that field's default, 3 / 1/3). Each field reads as a decimal in
+    // the user's number format or a whole fraction « 1/3 »; the low < high cross-check runs on
+    // the EFFECTIVE values (the size-table rule). A refusal names itself and writes nothing (the
+    // typed text kept, G1 AC1); a success re-mirrors and re-renders the list. ──
+    {
+        let ui_weak = ui.as_weak();
+        let config = Rc::clone(config);
+        let path = config_path.clone();
+        let journal_state = Rc::clone(journal_state);
+        ui.global::<Prefs>()
+            .on_ud_thresholds_changed(move |high, low| {
+                let ui = ui_weak.unwrap();
+                let format = config.borrow().number_format;
+                let fields =
+                    ud_threshold_input(high.trim(), format, crate::state::MSG_UD_HIGH_INVALID)
+                        .and_then(|high| {
+                            ud_threshold_input(low.trim(), format, crate::state::MSG_UD_LOW_INVALID)
+                                .map(|low| (high, low))
+                        });
+                let (high, low) = match fields {
+                    Ok(pair) => pair,
+                    Err(message) => {
+                        crate::wiring::dialog::refuse(&ui, &message);
+                        return false;
+                    }
+                };
+                if !ud_pair_ordered(high.as_deref(), low.as_deref()) {
+                    crate::wiring::dialog::refuse(&ui, crate::state::MSG_UD_PAIR_CROSSED);
+                    return false;
+                }
+                {
+                    let mut cfg = config.borrow_mut();
+                    cfg.ud_high_threshold = high;
+                    cfg.ud_low_threshold = low;
+                }
+                persist(path.as_ref(), &config.borrow());
+                mirror_risk_settings(&ui, &config.borrow());
+                crate::wiring::studies::refresh_studies(&ui, &journal_state.borrow());
+                true
+            });
+    }
     // ── Story 6.7 (FR45) — the diversify-by-size table: two boundaries + three targets, committed
     // WHOLE or not at all ("" = that field's default; the small < medium cross-check runs on the
     // EFFECTIVE values so a half-empty commit cannot cross the defaults). ──
@@ -657,6 +762,60 @@ mod tests {
         cfg.default_trailing_stop_pct = None;
         assert_eq!(risk_settings_shown(&cfg).default_stop, "");
         assert_eq!(setting_input("", NumberFormat::Point, valid, "x"), Ok(None));
+    }
+
+    #[test]
+    fn a_ud_threshold_reads_a_decimal_in_the_users_format_or_a_fraction() {
+        // Issue #294: the decided input format — a decimal in the user's number format (« 0,5 »
+        // under the comma format) or a whole fraction « 1/3 »; blank = the default.
+        let invalid = "invalide";
+        let read = |v: &str, f| ud_threshold_input(v, f, invalid);
+        assert_eq!(read("", NumberFormat::Comma), Ok(None));
+        assert_eq!(read("3", NumberFormat::Comma), Ok(Some("3".into())));
+        assert_eq!(read("0,5", NumberFormat::Comma), Ok(Some("0.5".into())));
+        assert_eq!(read("0.5", NumberFormat::Point), Ok(Some("0.5".into())));
+        assert_eq!(read("1/3", NumberFormat::Comma), Ok(Some("1/3".into())));
+        assert_eq!(
+            read(" 01 / 3 ", NumberFormat::Point),
+            Ok(Some("1/3".into()))
+        );
+        // An ambiguous decimal is refused as such (« 0.33 » under the comma format reads fine —
+        // only a point that could be a thousands point is ambiguous).
+        assert_eq!(
+            read("1.250", NumberFormat::Comma),
+            Err(crate::state::MSG_NUMBER_AMBIGUOUS_COMMA.to_string())
+        );
+        for refused in ["0", "-1", "0/3", "1/0", "1,5/3", "un tiers", "1/3/4", "/3"] {
+            assert_eq!(
+                read(refused, NumberFormat::Comma),
+                Err(invalid.to_string()),
+                "{refused:?}"
+            );
+        }
+        // Shown back: a fraction verbatim, a decimal in the format — and it reads back.
+        assert_eq!(ud_threshold_shown("1/3", NumberFormat::Comma), "1/3");
+        assert_eq!(ud_threshold_shown("0.5", NumberFormat::Comma), "0,5");
+        assert_eq!(ud_threshold_shown("0.5", NumberFormat::Point), "0.5");
+        assert_eq!(
+            read(
+                &ud_threshold_shown("0.5", NumberFormat::Comma),
+                NumberFormat::Comma
+            ),
+            Ok(Some("0.5".into()))
+        );
+        // The pair cross-check runs on the effective values (blank = default 3 / 1/3).
+        assert!(ud_pair_ordered(None, None));
+        assert!(ud_pair_ordered(Some("2"), Some("0.5")));
+        assert!(!ud_pair_ordered(Some("2"), Some("2")), "equal is crossed");
+        assert!(
+            !ud_pair_ordered(None, Some("4")),
+            "low 4 above the default high 3"
+        );
+        assert!(
+            !ud_pair_ordered(Some("1/4"), None),
+            "high 1/4 below the default low 1/3"
+        );
+        assert!(ud_pair_ordered(Some("1/2"), None));
     }
 
     #[test]
