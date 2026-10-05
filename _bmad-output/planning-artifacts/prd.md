@@ -92,6 +92,8 @@ editHistory:
   - date: '2026-10-03'
     changes: "Owner decisions (Guy 2026-10-03): Appendix A — an undefined U/D ratio (price ≤ forecast low) reads « ∞ » on every screen (« illimité » in the PDFs, whose font has no such glyph), « — » staying for an unknown one; every shown date or time of a recorded instant is local (traceability, frozen verdict, history, lists, comparison, review, quick screen, holdings), typed calendar dates and session dates shown as given. Tagged « réconcilié 2026-10-03 »."
   - date: '2026-10-03'
+    changes: "FR54 extended — owner decision (Guy, 2026-10-03, issue #294): the study list shows a U/D emoticon beside the ticker (🙂 at or above the high threshold or an undefined ratio, 😐 between, 🙁 below the low threshold; none where the U/D column reads « — »; greyed when the verdict is provisional), thresholds set in Réglages (defaults 3 and 1/3, a decimal in the number format or a whole fraction), screen only. Tagged « ajouté 2026-10-03 (issue #294) »."
+  - date: '2026-10-03'
     changes: "Owner decisions H and I (Guy 2026-10-03): Appendix A — an undefined U/D ratio MEETS the U/D ≥ 3 verdict criterion (∞ ≥ 3), an unknown one still withholds it; a method change, `ssg-1.3.0` (method spec §1, §9; frozen verdicts keep their method and show the difference, FR68). A blank transaction, dividend or FX-rate date defaults to the owner's local day, stored as that calendar date at midnight UTC. Tagged « réconcilié 2026-10-03 : décision Guy H » / « … I »."
 ---
 
@@ -925,6 +927,16 @@ withholding-refund tracking, export/share, eventual public release.
 ### Application Shell & Data Management
 - FR54 **[P1]:** The user can **list, search, sort and filter** saved studies and open them from a home
   dashboard.
+  The list shows, beside each study's ticker, an **emoticon read off its upside/downside ratio**:
+  🙂 when the ratio is at or above a high threshold, or undefined (current price at or below the
+  forecast low — the list's « ∞ »); 🙁 when it is below a low threshold; 😐 in between (exactly the
+  high threshold is 🙂, exactly the low one is 😐; exact decimal comparisons). No emoticon where the
+  list's U/D column reads « — » (verdict withheld, ratio unknown); the emoticon is **greyed** when the
+  verdict is provisional (e.g. a stale or undated current price). The two thresholds are set in
+  Réglages — defaults **3** and **1/3**, each a decimal in the user's number format or a fraction of
+  two whole numbers; the low threshold must stay below the high one, else the change is refused by
+  name. The defaults are the NAIC « U/D ≥ 3 » criterion and its mirror, not the zone boundaries (the
+  zones are thirds, edges at U/D 2 and 1/2; setting 2 and 1/2 aligns the emoticon with them). Screen only: never printed in a PDF (ajouté 2026-10-03 (issue #294) — owner decision, Guy).
 - FR55 **[P1]:** The user can **delete or archive** a study (with confirmation); deletions never corrupt
   the journal time-series. **[P4]:** deleting a study also deletes its AI drafts, as it does its
   judgment history.

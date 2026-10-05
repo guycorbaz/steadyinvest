@@ -196,7 +196,8 @@ decide → record* — repeated per study and revisited over time.
 - **Continuity →** durable, reopenable studies with projection-vs-reality overlay; rationale
   captured as a first-class artifact.
 - **Avoid:** patronizing guidance, noisy dashboards, blocking dialogs, cheerful gamification, or any
-  tone that implies the app knows better than the user.
+  tone that implies the app knows better than the user. (One owner-made exception: the study list's
+  U/D emoticon, issue #294 — see component 13.)
 
 ### Emotional Design Principles
 
@@ -908,6 +909,21 @@ domain logic — they consume the colour/alpha + metric/typo token families.
 12. **State legend** (FR57) · **empty/error states** (FR58) · **contextual help/glossary popover +
     read-only demo study** (FR62).
 13. **App nav rail + study dashboard** (list/search/sort/filter/archive — FR54/FR55).
+    The study list's row (ajouté 2026-10-03 (issue #294) — owner decision, Guy): a fixed slot before
+    the ticker holds a **U/D emoticon** — 🙂 at or above the high threshold or for an undefined ratio
+    (« ∞ »), 😐 between the thresholds, 🙁 below the low one; empty where the U/D column reads « — »
+    (withheld verdict, unknown ratio), so the tickers stay aligned. A provisional verdict draws it
+    **greyed** (reduced opacity). Hovering it shows its words (« U/D ≥ 3 (seuil haut) », « U/D < 1/3
+    (seuil bas) », « U/D entre 1/3 et 3 (seuils bas et haut) », « U/D indéfini (∞) : cours au prix
+    bas prévu ou en dessous », with « — verdict provisoire, émoticône grisée » when greyed), which are
+    also its accessible label. Thresholds in Réglages (« Émoticône U/D de la liste des études », Seuil
+    haut / Seuil bas, defaults 3 and 1/3). Screen only, never in a PDF. The renderers available here
+    draw the faces from a monochrome font (in the text ink), not in colour. The defaults 3 and 1/3
+    are the NAIC « U/D ≥ 3 » criterion and its mirror, NOT the app's zone boundaries: the zones are
+    thirds, whose edges sit at U/D 2 and 1/2 — so a study in the buy zone at 2,6:1 shows 😐; setting
+    the thresholds to 2 and 1/2 aligns the emoticon with the zones. Owner decision (Guy, 2026-10-03,
+    issue #294): real emoticons were chosen over sober glyphs (▲ ● ▼) knowingly — an explicit,
+    owner-made exception to the « Avoid: … cheerful gamification » line, limited to this marker.
 14. **Portfolio set** — holdings register, capital-at-risk panel, trailing-stop control,
     sell/raise-stop action sheet (neutral), watchlist.
 15. **Settings panels** (no wizard) — provider/key, reference currency, risk thresholds, label set
